@@ -1,8 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -11,19 +6,185 @@ datasource db {
   provider = "postgresql"
 }
 
-model Student {
-  id        String   @id @default(cuid())
-  name      String
-  email     String   @unique
-  major     String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum CourseStatus {
+  completed
+  in_progress
+  planned
 }
 
+enum DeliveryMode {
+  in_person
+  online
+  hybrid
+}
+
+// ─── Auth / Profile ───────────────────────────────────────────────────────────
+
+model User {
+  id             String   @id @default(cuid())
+  fullName       String
+  email          String   @unique
+  passwordHash   String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Set during onboarding / profile edit
+  major          String?
+  graduationYear Int?
+  transcriptUrl  String?  // Supabase Storage path for the uploaded PDF
+
+  googleToken    GoogleToken?
+  userCourses    UserCourse[]
+  calendarEvents CalendarEvent[]
+  aiInsights     AiInsights?
+}
+
+model GoogleToken {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  accessToken  String
+  refreshToken String
+  tokenExpiry  DateTime
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── UC Davis Course Catalog ──────────────────────────────────────────────────
+
+// All known UCD courses (static catalog — populated once, updated periodically)
 model Course {
-  id         String   @id @default(cuid())
-  name       String
-  credits    Int
-  department String
-  createdAt  DateTime @default(now())
+  id            String   @id @default(cuid())
+  courseCode    String   @unique  // e.g. "ECS 20"
+  title         String
+  units         Int
+  department    String
+  description   String?
+  prerequisites String[] // course codes, e.g. ["ECS 10", "MAT 21A"]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sections    CourseSection[]
+  userCourses UserCourse[]
+  requirements RequirementCourse[]
+}
+
+// Quarter-specific offerings: which sections run in e.g. "Fall 2026"
+model CourseSection {
+  id         String       @id @default(cuid())
+  courseId   String
+  quarter    String       // e.g. "Fall 2026"
+  crn        String?      // UCD Course Reference Number
+  instructor String?
+  days       String[]     // e.g. ["Monday", "Wednesday"]
+  startTime  String?      // "08:00"
+  endTime    String?      // "09:00"
+  location   String?
+  mode       DeliveryMode?
+  capacity   Int?
+  enrolled   Int?
+  createdAt  DateTime     @default(now())
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([quarter])
+  @@index([courseId, quarter])
+}
+
+// ─── Major Requirements ───────────────────────────────────────────────────────
+
+model Major {
+  id             String   @id @default(cuid())
+  name           String   @unique // e.g. "Computer Science"
+  department     String
+  totalUnits     Int
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  requirements Requirement[]
+}
+
+// A logical group of courses required for a major (e.g. "Core CS", "Math", "GE Writing")
+model Requirement {
+  id          String   @id @default(cuid())
+  majorId     String
+  name        String   // e.g. "Upper Division CS Electives"
+  description String?
+  minCourses  Int?     // minimum number of courses to satisfy this requirement
+  minUnits    Int?     // minimum units
+  minLevel    Int?     // e.g. 300 for upper-division
+  createdAt   DateTime @default(now())
+
+  major   Major               @relation(fields: [majorId], references: [id], onDelete: Cascade)
+  courses RequirementCourse[]
+}
+
+// Many-to-many: which courses satisfy which requirement
+model RequirementCourse {
+  requirementId String
+  courseId      String
+
+  requirement Requirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  course      Course      @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@id([requirementId, courseId])
+}
+
+// ─── User Academic Progress ───────────────────────────────────────────────────
+
+model UserCourse {
+  id       String       @id @default(cuid())
+  userId   String
+  courseId String
+  status   CourseStatus
+  grade    String?      // e.g. "A", "B+", null if planned/in_progress
+  quarter  String?      // e.g. "Fall 2024"
+  units    Int?         // override if transferred credits differ
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId])
+  @@index([userId, status])
+}
+
+// ─── Google Calendar ──────────────────────────────────────────────────────────
+
+model CalendarEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  googleId  String?  // Google Calendar event ID (for sync/dedup)
+  title     String
+  day       String   // "Monday" … "Sunday"
+  startTime String   // "08:00"
+  endTime   String   // "09:00"
+  type      String   // "class" | "work" | "other"
+  recurring Boolean  @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─── AI Insights ─────────────────────────────────────────────────────────────
+
+model AiInsights {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  preferredTimeOfDay String?  // "morning" | "afternoon" | "evening"
+  avgClassStartHour  Float?
+  avgClassEndHour    Float?
+  busiestDays        String[]
+  lightestDays       String[]
+  prefersBackToBack  Boolean?
+  prefersShortGaps   Boolean?
+  maxDaysOnCampus    Int?
+  workDays           String[]
+  workHoursPerWeek   Int?
+  summary            String?
+  lastAnalyzed       DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
