@@ -1,3 +1,48 @@
+# Node
+node_modules/
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+
+# Prisma generated artifacts
+node_modules/.prisma/
+.prisma/
+
+# TypeScript build cache
+*.tsbuildinfo
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Coverage
+coverage/
+
+# Editor directories and files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Env files (local secrets)
+.env
+.env.*
+!.env.example
+
+# Monorepo / caching
+.turbo/
+.cache/
 # Logs
 logs
 *.log
