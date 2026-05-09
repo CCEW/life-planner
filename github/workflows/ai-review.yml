@@ -1,0 +1,32 @@
+name: AI Code Review
+
+# Grants the action permission to read the code and post comments on the PR
+permissions:
+  contents: read
+  pull-requests: write
+
+# Tells the action to run whenever a PR is opened/updated, or a comment is left
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  pull_request_review_comment:
+    types: [created]
+
+# Prevents multiple AI reviews from running over each other if someone pushes code rapidly
+concurrency:
+  group: ${{ github.repository }}-${{ github.event.number || github.head_ref || github.sha }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run CodeRabbit AI Reviewer
+        uses: coderabbitai/openai-pr-reviewer@latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        with:
+          debug: false
+          review_simple_changes: false
+          review_comment_lgtm: false
