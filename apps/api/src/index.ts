@@ -17,6 +17,7 @@ import aggieMateRouter from "./routes/aggieMate";
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
 const app = express();
+const isVercel = process.env.VERCEL === "1" || process.env.VERCEL === "true";
 
 app.use(cors({
   origin: process.env.FRONTEND_URL ?? "http://localhost:3000",
@@ -53,7 +54,11 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
-const PORT = process.env.PORT ?? 4000;
-app.listen(PORT, () => {
-  console.log(`API running on http://localhost:${PORT}`);
-});
+if (!isVercel) {
+  const PORT = process.env.PORT ?? 4000;
+  app.listen(PORT, () => {
+    console.log(`API running on http://localhost:${PORT}`);
+  });
+}
+
+export default app;
