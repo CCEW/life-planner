@@ -69,6 +69,10 @@ export default function AggiematePage() {
   const [matchesLoading, setMatchesLoading] = useState(false);
   const [matchesError, setMatchesError] = useState<string | null>(null);
   const [matchedUserIds, setMatchedUserIds] = useState<Set<string>>(new Set());
+  const [friendQuery, setFriendQuery] = useState("");
+  const [friendResults, setFriendResults] = useState<StudyMatch[]>([]);
+  const [friendSearchLoading, setFriendSearchLoading] = useState(false);
+  const [friendSearchError, setFriendSearchError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,6 +103,48 @@ export default function AggiematePage() {
       window.removeEventListener("focus", syncCurrentCourses);
     };
   }, []);
+
+  useEffect(() => {
+    const query = friendQuery.trim();
+    if (query.length < 2) {
+      setFriendResults([]);
+      setFriendSearchError(null);
+      setFriendSearchLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setFriendSearchLoading(true);
+      setFriendSearchError(null);
+      try {
+        const res = await fetch(`${API}/api/aggie-mate/search`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query,
+            freeCells: Array.from(freeCells),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Could not search for this friend.");
+        if (!cancelled) setFriendResults(Array.isArray(data.results) ? data.results : []);
+      } catch (err) {
+        if (!cancelled) {
+          setFriendResults([]);
+          setFriendSearchError(err instanceof Error ? err.message : "Could not search for this friend.");
+        }
+      } finally {
+        if (!cancelled) setFriendSearchLoading(false);
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [friendQuery, freeCells]);
 
   function cellKey(day: string, hour: number) {
     return `${day}-${hour}`;
@@ -171,6 +217,7 @@ export default function AggiematePage() {
 
   async function handleMatch(userId: string) {
     setMatchesError(null);
+    setFriendSearchError(null);
     try {
       const res = await fetch(`${API}/api/aggie-mate/match`, {
         method: "POST",
@@ -182,7 +229,9 @@ export default function AggiematePage() {
       if (!res.ok) throw new Error(data.error ?? "Could not match with this student.");
       setMatchedUserIds((current) => new Set(current).add(userId));
     } catch (err) {
-      setMatchesError(err instanceof Error ? err.message : "Could not match with this student.");
+      const message = err instanceof Error ? err.message : "Could not match with this student.";
+      setMatchesError(message);
+      setFriendSearchError(message);
     }
   }
 
@@ -192,12 +241,12 @@ export default function AggiematePage() {
       onMouseUp={handleMouseUp}
     >
       {/* ── Navbar ── */}
-      <nav className="bg-[#B4E1FF] px-8 py-1.5 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2.5">
-          <Image src="/logo2.png" alt="Student Life Helper" width={100} height={100} className="object-contain" />
-          <span className="text-[#241715] text-[30px] font-medium tracking-wide">Student Life Helper</span>
+      <nav className="bg-[#1B3968] px-8 py-1.5 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-3">
+          <Image src="/logo2.png" alt="Student Life Helper" width={70} height={70} className="object-contain" />
+          <span className="text-white text-[30px] font-medium tracking-wide">Student Life Helper</span>
         </div>
-        <Link href="/dashboard" className="flex items-center gap-1.5 text-[#2C1A1D] text-[13px] hover:text-[#2C1A1D]/70 transition-colors">
+        <Link href="/dashboard" className="flex items-center gap-1.5 text-white/85 text-[13px] hover:text-white transition-colors">
           <ArrowLeftIcon />
           Return to home page
         </Link>
@@ -242,9 +291,60 @@ export default function AggiematePage() {
                 </span>
                 <input
                   type="text"
-                  placeholder="Search by name or UC Davis email…"
+                  value={friendQuery}
+                  onChange={(event) => setFriendQuery(event.target.value)}
+                  placeholder="Search by name or UC Davis email..."
                   className="w-full pl-8 pr-3 py-2 text-[13px] rounded-lg border border-[#B3C1BB]/50 bg-[#F8F8F6] placeholder:text-[#B3C1BB] focus:outline-none focus:border-[#1B3968] focus:ring-1 focus:ring-[#1B3968]/10"
                 />
+              </div>
+              <div className="mt-3 flex flex-col gap-2">
+                {friendSearchError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                    <p className="text-[12px] text-red-500">{friendSearchError}</p>
+                  </div>
+                )}
+                {friendSearchLoading ? (
+                  <p className="text-[12px] text-[#94AAA1]">Searching...</p>
+                ) : friendQuery.trim().length >= 2 && friendResults.length === 0 && !friendSearchError ? (
+                  <p className="text-[12px] text-[#B3C1BB] leading-relaxed">
+                    No user found for that name or email.
+                  </p>
+                ) : (
+                  friendResults.map((friend) => (
+                    <div
+                      key={friend.userId}
+                      className="rounded-xl border border-[#B3C1BB]/40 bg-[#F8F8F6] px-3 py-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[13px] font-semibold text-[#1a1a1a] truncate">{friend.name}</p>
+                          <p className="text-[11px] text-[#94AAA1] truncate">{friend.email}</p>
+                        </div>
+                        <button
+                          onClick={() => handleMatch(friend.userId)}
+                          disabled={matchedUserIds.has(friend.userId)}
+                          className={`shrink-0 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
+                            matchedUserIds.has(friend.userId)
+                              ? "bg-[#6A9879]/15 text-[#487A62]"
+                              : "bg-white border border-[#B3C1BB]/60 text-[#1a1a1a] hover:bg-[#1B3968] hover:text-white hover:border-[#1B3968]"
+                          }`}
+                        >
+                          {matchedUserIds.has(friend.userId) ? "Matched" : "Match"}
+                        </button>
+                      </div>
+                      <p className="mt-2 text-[12px] text-[#5a6872]">
+                        {friend.commonCourses.length > 0
+                          ? `Shared class: ${friend.commonCourses.map((course) => `${course.courseCode} - ${course.title}`).join(", ")}`
+                          : "No shared current classes found."}
+                      </p>
+                      <p className="mt-1 text-[11px] text-[#6A9879] font-medium">
+                        {friend.commonFreeTimes.length > 0
+                          ? `Free together: ${friend.commonFreeTimes.slice(0, 3).join(", ")}${friend.commonFreeTimes.length > 3 ? ` +${friend.commonFreeTimes.length - 3} more` : ""}`
+                          : "Mark availability to compare free time."}
+                      </p>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>

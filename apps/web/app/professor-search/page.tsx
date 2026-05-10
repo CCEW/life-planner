@@ -1086,12 +1086,12 @@ export default function ProfessorSearchPage() {
       )}
 
       {/* ── Navbar ── */}
-      <nav className="bg-[#B4E1FF] px-8 py-1.5 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2.5">
-          <Image src="/logo2.png" alt="Student Life Helper" width={100} height={100} className="object-contain" />
-          <span className="text-[#241715] text-[30px] font-medium tracking-wide">Student Life Helper</span>
+      <nav className="bg-[#1B3968] px-8 py-1.5 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-3">
+          <Image src="/logo2.png" alt="Student Life Helper" width={70} height={70} className="object-contain" />
+          <span className="text-white text-[30px] font-medium tracking-wide">Student Life Helper</span>
         </div>
-        <Link href="/dashboard" className="flex items-center gap-1.5 text-[#2C1A1D] text-[13px] hover:text-[#2C1A1D]/70 transition-colors">
+        <Link href="/dashboard" className="flex items-center gap-1.5 text-white/85 text-[13px] hover:text-white transition-colors">
           <ArrowLeftIcon />
           Return to home page
         </Link>
