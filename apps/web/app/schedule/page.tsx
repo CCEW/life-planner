@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -16,6 +16,67 @@ type CalEvent = {
   end?:   { dateTime?: string; date?: string };
   location?: string;
 };
+
+type Course = {
+  courseCode: string;
+  title: string;
+  units: number | null;
+  grade: string | null;
+  quarter: string | null;
+};
+
+// ─── Week helpers ─────────────────────────────────────────────────────────────
+
+function quarterKey(q: string | null): number {
+  if (!q) return -1;
+  const m = q.toLowerCase().match(/(fall|summer|spring|winter)\s+(\d{4})/);
+  if (!m) return -1;
+  const season = { spring: 3, winter: 2, fall: 1, summer: 0 }[m[1]] ?? 0;
+  return parseInt(m[2]) * 4 + season;
+}
+
+function getMondayOfWeek(offset = 0): Date {
+  const today = new Date();
+  const day = today.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + diff + offset * 7);
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+}
+
+function getWeekDates(offset = 0): Date[] {
+  const monday = getMondayOfWeek(offset);
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    return d;
+  });
+}
+
+function isSameDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+}
+
+function eventsForDate(events: CalEvent[], date: Date): CalEvent[] {
+  return events.filter((ev) => {
+    const raw = ev.start?.dateTime ?? ev.start?.date;
+    if (!raw) return false;
+    return isSameDay(new Date(raw), date);
+  }).sort((a, b) => {
+    const ta = new Date(a.start?.dateTime ?? a.start?.date ?? 0).getTime();
+    const tb = new Date(b.start?.dateTime ?? b.start?.date ?? 0).getTime();
+    return ta - tb;
+  });
+}
+
+function shortTime(ev: CalEvent): string {
+  const raw = ev.start?.dateTime;
+  if (!raw) return "All day";
+  return new Date(raw).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -75,36 +136,6 @@ function CheckIcon() {
   );
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatEventTime(ev: CalEvent): string {
-  const start = ev.start?.dateTime ?? ev.start?.date;
-  const end   = ev.end?.dateTime   ?? ev.end?.date;
-  if (!start) return "";
-
-  const s = new Date(start);
-  const e = end ? new Date(end) : null;
-
-  const datePart = s.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-  if (ev.start?.dateTime) {
-    const timePart = s.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-    const endPart  = e ? e.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "";
-    return `${datePart} · ${timePart}${endPart ? ` – ${endPart}` : ""}`;
-  }
-  return `${datePart} (all day)`;
-}
-
-// Group events by date label
-function groupEventsByDay(events: CalEvent[]): Record<string, CalEvent[]> {
-  return events.reduce<Record<string, CalEvent[]>>((acc, ev) => {
-    const raw = ev.start?.dateTime ?? ev.start?.date ?? "";
-    const label = raw
-      ? new Date(raw).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })
-      : "Unknown date";
-    (acc[label] ??= []).push(ev);
-    return acc;
-  }, {});
-}
 
 // ─── Panel shell ──────────────────────────────────────────────────────────────
 
@@ -125,10 +156,39 @@ export default function SchedulePlannerPage() {
   const searchParams = useSearchParams();
   const router       = useRouter();
 
-  const [connected, setConnected] = useState(false);
-  const [events,    setEvents]    = useState<CalEvent[]>([]);
-  const [loading,   setLoading]   = useState(false);
-  const [error,     setError]     = useState<string | null>(null);
+  const [connected,   setConnected]   = useState(false);
+  const [events,      setEvents]      = useState<CalEvent[]>([]);
+  const [loading,     setLoading]     = useState(false);
+  const [error,       setError]       = useState<string | null>(null);
+  const [weekOffset,  setWeekOffset]  = useState(0);
+  const [courses,         setCourses]         = useState<Course[]>([]);
+  const [transcriptLoading, setTranscriptLoading] = useState(false);
+  const [transcriptError,   setTranscriptError]   = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleTranscriptUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setTranscriptLoading(true);
+    setTranscriptError(null);
+    try {
+      const form = new FormData();
+      form.append("transcript", file);
+      const res = await fetch(`${API}/api/transcript/upload`, {
+        method: "POST",
+        credentials: "include",
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) { setTranscriptError(data.error ?? "Upload failed."); return; }
+      setCourses(data.courses ?? []);
+    } catch {
+      setTranscriptError("Could not reach the server.");
+    } finally {
+      setTranscriptLoading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
 
   // Fetch calendar events from the backend
   const fetchEvents = useCallback(async () => {
@@ -180,8 +240,6 @@ export default function SchedulePlannerPage() {
     setConnected(false);
     setEvents([]);
   }
-
-  const grouped = groupEventsByDay(events);
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F4F2E8]">
@@ -251,45 +309,65 @@ export default function SchedulePlannerPage() {
                   </div>
                 </div>
 
-                {/* Event list */}
-                {loading ? (
-                  <div className="flex items-center justify-center py-10">
-                    <p className="text-[13px] text-[#B3C1BB] animate-pulse">Loading events…</p>
-                  </div>
-                ) : events.length === 0 ? (
-                  <div className="flex items-center justify-center py-10">
-                    <p className="text-[13px] text-[#B3C1BB]">No upcoming events in the next 30 days.</p>
-                  </div>
-                ) : (
-                  <div className="overflow-y-auto max-h-72 flex flex-col gap-4 pr-1">
-                    {Object.entries(grouped).map(([day, dayEvents]) => (
-                      <div key={day}>
-                        <p className="text-[11px] font-semibold text-[#94AAA1] uppercase tracking-wide mb-1.5">{day}</p>
-                        <div className="flex flex-col gap-1.5">
-                          {dayEvents.map((ev) => (
-                            <div
-                              key={ev.id}
-                              className="flex items-start gap-3 px-3 py-2.5 rounded-lg bg-white/80 border border-[#B3C1BB]/30"
-                            >
-                              <div className="w-1.5 h-1.5 rounded-full bg-[#1B3968] mt-1.5 shrink-0" />
-                              <div className="min-w-0">
-                                <p className="text-[13px] font-medium text-[#1a1a1a] truncate">
-                                  {ev.summary ?? "(No title)"}
+                {/* Week navigation */}
+                {(() => {
+                  const weekDates = getWeekDates(weekOffset);
+                  const today = new Date();
+                  const rangeLabel = `${weekDates[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${weekDates[6].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+                  return (
+                    <>
+                      <div className="flex items-center justify-between mb-3">
+                        <button onClick={() => setWeekOffset((o) => o - 1)} className="text-[11px] px-2 py-1 rounded border border-[#B3C1BB]/40 text-[#5a6872] hover:border-[#1B3968] transition-colors">← Prev</button>
+                        <span className="text-[12px] font-medium text-[#5a6872]">{rangeLabel}</span>
+                        <button onClick={() => setWeekOffset((o) => o + 1)} className="text-[11px] px-2 py-1 rounded border border-[#B3C1BB]/40 text-[#5a6872] hover:border-[#1B3968] transition-colors">Next →</button>
+                      </div>
+
+                      {loading ? (
+                        <div className="flex items-center justify-center py-10">
+                          <p className="text-[13px] text-[#B3C1BB] animate-pulse">Loading events…</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-7 gap-1.5 overflow-y-auto max-h-80">
+                          {/* Day headers */}
+                          {weekDates.map((date) => {
+                            const isToday = isSameDay(date, today);
+                            return (
+                              <div key={date.toISOString()} className={`text-center pb-1.5 border-b ${isToday ? "border-[#1B3968]" : "border-[#B3C1BB]/30"}`}>
+                                <p className={`text-[10px] font-semibold uppercase tracking-wide ${isToday ? "text-[#1B3968]" : "text-[#94AAA1]"}`}>
+                                  {date.toLocaleDateString("en-US", { weekday: "short" })}
                                 </p>
-                                <p className="text-[11px] text-[#94AAA1] mt-0.5">
-                                  {formatEventTime(ev)}
+                                <p className={`text-[13px] font-bold ${isToday ? "text-[#1B3968]" : "text-[#1a1a1a]"}`}>
+                                  {date.getDate()}
                                 </p>
-                                {ev.location && (
-                                  <p className="text-[11px] text-[#B3C1BB] mt-0.5 truncate">{ev.location}</p>
+                              </div>
+                            );
+                          })}
+
+                          {/* Event columns */}
+                          {weekDates.map((date) => {
+                            const dayEvs = eventsForDate(events, date);
+                            return (
+                              <div key={date.toISOString()} className="flex flex-col gap-1 pt-1.5 min-h-[120px]">
+                                {dayEvs.length === 0 ? (
+                                  <p className="text-[10px] text-[#B3C1BB] text-center mt-2">—</p>
+                                ) : (
+                                  dayEvs.map((ev) => (
+                                    <div key={ev.id} className="rounded px-1.5 py-1 bg-[#1B3968]/8 border border-[#1B3968]/15 group">
+                                      <p className="text-[10px] font-medium text-[#1B3968] leading-tight line-clamp-2">
+                                        {ev.summary ?? "(No title)"}
+                                      </p>
+                                      <p className="text-[9px] text-[#94AAA1] mt-0.5">{shortTime(ev)}</p>
+                                    </div>
+                                  ))
                                 )}
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
           </Panel>
@@ -312,9 +390,65 @@ export default function SchedulePlannerPage() {
         <div className="flex flex-col gap-5">
 
           <Panel label="Courses taken" className="flex flex-col">
-            <div className="min-h-[110px] flex items-center justify-center">
-              <p className="text-[12px] text-[#B3C1BB]">No courses added yet</p>
-            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf"
+              className="hidden"
+              onChange={handleTranscriptUpload}
+            />
+            {courses.length === 0 ? (
+              <div className="min-h-[110px] flex flex-col items-center justify-center gap-2">
+                {transcriptLoading ? (
+                  <p className="text-[12px] text-[#94AAA1] animate-pulse">Reading transcript…</p>
+                ) : (
+                  <>
+                    <p className="text-[12px] text-[#B3C1BB]">No courses added yet</p>
+                    {transcriptError && (
+                      <p className="text-[11px] text-red-400 text-center px-2">{transcriptError}</p>
+                    )}
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="mt-1 px-3 py-1.5 rounded-lg border border-[#B3C1BB]/50 text-[12px] text-[#5a6872] hover:border-[#1B3968] hover:text-[#1B3968] transition-colors"
+                    >
+                      Upload transcript PDF
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-[11px] text-[#94AAA1]">{courses.length} course{courses.length !== 1 ? "s" : ""} found</p>
+                  <button
+                    onClick={() => { setCourses([]); setTranscriptError(null); }}
+                    className="text-[11px] text-[#94AAA1] hover:text-red-400 transition-colors"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="overflow-y-auto max-h-52 flex flex-col gap-1">
+                  {[...courses].sort((a, b) => quarterKey(b.quarter) - quarterKey(a.quarter)).map((c, i) => (
+                    <div key={i} className="flex items-center justify-between px-2.5 py-2 rounded-lg bg-white/70 border border-[#B3C1BB]/30">
+                      <div className="min-w-0">
+                        <p className="text-[12px] font-bold text-[#1B3968]">{c.courseCode}</p>
+                        <p className="text-[11px] text-[#1a1a1a] truncate">{c.title}</p>
+                        <p className="text-[10px] text-[#94AAA1]">{c.quarter ?? "—"}</p>
+                      </div>
+                      {c.grade && (
+                        <span className="text-[11px] font-bold text-[#487A62] shrink-0 ml-2">{c.grade}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-1 text-[11px] text-[#94AAA1] hover:text-[#1B3968] transition-colors self-start"
+                >
+                  {transcriptLoading ? "Reading…" : "Re-upload"}
+                </button>
+              </div>
+            )}
           </Panel>
 
           <Panel label="Courses still needed" className="flex flex-col">

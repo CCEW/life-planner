@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import path from "path";
 import googleCalendarRouter from "./routes/googleCalendar";
 import authRouter from "./routes/auth";
+import transcriptRouter from "./routes/transcript";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
@@ -23,6 +24,9 @@ app.use(authRouter);
 
 // ── Google Calendar OAuth + events ───────────────────────────────────────────
 app.use(googleCalendarRouter);
+
+// ── Transcript PDF parsing ────────────────────────────────────────────────────
+app.use(transcriptRouter);
 
 // ── Health check ─────────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => {
