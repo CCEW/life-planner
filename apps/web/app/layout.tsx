@@ -9,7 +9,7 @@ const poppins = Poppins({
 });
 
 export const metadata: Metadata = {
-  title: "Student Life Helper",
+  title: "AGGIE PLANNER",
   description: "Plan your UC Davis academic life smarter",
 };
 
