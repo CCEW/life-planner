@@ -213,3 +213,4 @@ infra/sql/20260510_courses_offered_by_term.sql
 infra/sql/20260510_engineering_seed_tables.sql
 infra/sql/20260511_professor_tables.sql
 infra/sql/20260511_structured_major_requirements.sql
+.mcp.json
