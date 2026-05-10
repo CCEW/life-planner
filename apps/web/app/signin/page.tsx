@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 
-// ─── Icon components (inline SVG, no extra dependency) ────────────────────────
+// ─── Icons ────────────────────────────────────────────────────────────────────
 
 function SchoolIcon() {
   return (
@@ -77,13 +77,7 @@ const inputClass =
   "text-[#1a1a1a] w-full placeholder:text-[#94AAA1] " +
   "focus:outline-none focus:border-[#1B3968] focus:ring-2 focus:ring-[#1B3968]/10 transition-shadow";
 
-function Field({
-  label,
-  children,
-}: {
-  label: React.ReactNode;
-  children: React.ReactNode;
-}) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1 mb-3">
       <label className="text-[12px] font-medium text-[#5a6872]">{label}</label>
@@ -92,15 +86,7 @@ function Field({
   );
 }
 
-function Feature({
-  icon,
-  title,
-  description,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-}) {
+function Feature({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) {
   return (
     <div className="flex items-start gap-3">
       <div className="w-8 h-8 rounded-lg bg-[#6A9879]/20 flex items-center justify-center shrink-0">
@@ -118,54 +104,32 @@ function Feature({
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-export default function SignUpPage() {
+export default function SignInPage() {
   const router = useRouter();
 
-  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [major, setMajor] = useState("");
-  const [graduationYear, setGraduationYear] = useState("");
   const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [agreed, setAgreed] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [needsConfirmation, setNeedsConfirmation] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-
-    if (password !== confirm) {
-      setError("Passwords do not match.");
-      return;
-    }
-    if (!agreed) {
-      setError("Please agree to the Terms of Service and Privacy Policy.");
-      return;
-    }
-
     setLoading(true);
+
     try {
-      const res = await fetch(`${API_URL}/auth/signup`, {
+      const res = await fetch(`${API_URL}/auth/signin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ fullName, email, password, major, graduationYear }),
+        body: JSON.stringify({ email, password }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
         setError(data.error ?? "Something went wrong. Please try again.");
-        return;
-      }
-
-      if (data.needsEmailConfirmation) {
-        setNeedsConfirmation(true);
         return;
       }
 
@@ -190,22 +154,10 @@ export default function SignUpPage() {
             <span className="text-[40px] font-medium text-[#1a1a1a]">Student Life Helper</span>
           </div>
 
-          <h1 className="text-[22px] font-medium text-[#1a1a1a] mb-1">Create your account</h1>
-          <p className="text-[13px] text-[#5a6872] mb-6">Join thousands of Aggies studying smarter</p>
+          <h1 className="text-[22px] font-medium text-[#1a1a1a] mb-1">Welcome back</h1>
+          <p className="text-[13px] text-[#5a6872] mb-6">Sign in to your account to continue</p>
 
           <form onSubmit={handleSubmit}>
-            {/* Full name */}
-            <Field label="Full name">
-              <input
-                type="text"
-                placeholder="e.g. Alex Rivera"
-                className={inputClass}
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                required
-              />
-            </Field>
-
             {/* Email */}
             <Field label="UC Davis email">
               <input
@@ -218,121 +170,39 @@ export default function SignUpPage() {
               />
             </Field>
 
-            {/* Major + Graduation year */}
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Major">
-                <select
-                  className={inputClass}
-                  value={major}
-                  onChange={(e) => setMajor(e.target.value)}
+            {/* Password */}
+            <Field label="Password">
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Enter your password"
+                  className={`${inputClass} pr-9`}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  aria-label="Toggle password visibility"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94AAA1] hover:text-[#1B3968] transition-colors"
                 >
-                  <option value="">Select major</option>
-                  <option>Aerospace Science and Engineering</option>
-                  <option>Biochemical Engineering</option>
-                  <option>Biological Systems Engineering</option>
-                  <option>Biomedical Engineering</option>
-                  <option>Chemical Engineering</option>
-                  <option>Civil Engineering</option>
-                  <option>Computer Engineering</option>
-                  <option>Computer Science</option>
-                  <option>Computer Science and Engineering</option>
-                  <option>Electrical Engineering</option>
-                  <option>Environmental Engineering</option>
-                  <option>Materials Science and Engineering</option>
-                  <option>Mechanical Engineering</option>
-                </select>
-              </Field>
-              <Field label="Graduation year">
-                <select
-                  className={inputClass}
-                  value={graduationYear}
-                  onChange={(e) => setGraduationYear(e.target.value)}
-                >
-                  <option value="">Year</option>
-                  <option>2026</option>
-                  <option>2027</option>
-                  <option>2028</option>
-                  <option>2029</option>
-                </select>
-              </Field>
+                  {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+                </button>
+              </div>
+            </Field>
+
+            {/* Forgot password */}
+            <div className="flex justify-end mb-5">
+              <Link href="#" className="text-[12px] text-[#1B3968] font-medium hover:underline">
+                Forgot password?
+              </Link>
             </div>
 
-            {/* Password + Confirm */}
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Password">
-                <div className="relative">
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Min. 8 characters"
-                    className={`${inputClass} pr-9`}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    minLength={8}
-                  />
-                  <button
-                    type="button"
-                    aria-label="Toggle password visibility"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94AAA1] hover:text-[#1B3968] transition-colors"
-                  >
-                    {showPassword ? <EyeOffIcon /> : <EyeIcon />}
-                  </button>
-                </div>
-              </Field>
-              <Field label="Confirm password">
-                <div className="relative">
-                  <input
-                    type={showConfirm ? "text" : "password"}
-                    placeholder="Repeat password"
-                    className={`${inputClass} pr-9`}
-                    value={confirm}
-                    onChange={(e) => setConfirm(e.target.value)}
-                    required
-                  />
-                  <button
-                    type="button"
-                    aria-label="Toggle confirm password visibility"
-                    onClick={() => setShowConfirm((v) => !v)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94AAA1] hover:text-[#1B3968] transition-colors"
-                  >
-                    {showConfirm ? <EyeOffIcon /> : <EyeIcon />}
-                  </button>
-                </div>
-              </Field>
-            </div>
-
-            {/* Terms */}
-            <div className="flex items-start gap-2 mb-5">
-              <input
-                type="checkbox"
-                id="terms"
-                className="mt-0.5 shrink-0 accent-[#1B3968]"
-                checked={agreed}
-                onChange={(e) => setAgreed(e.target.checked)}
-              />
-              <label htmlFor="terms" className="text-[12px] text-[#5a6872] leading-relaxed">
-                I agree to the{" "}
-                <Link href="#" className="text-[#1B3968] font-medium hover:underline">
-                  Terms of Service
-                </Link>{" "}
-                and{" "}
-                <Link href="#" className="text-[#1B3968] font-medium hover:underline">
-                  Privacy Policy
-                </Link>
-              </label>
-            </div>
-
-            {/* Status messages */}
+            {/* Error */}
             {error && (
               <p className="text-[12px] text-red-600 mb-4 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
                 {error}
-              </p>
-            )}
-            {needsConfirmation && (
-              <p className="text-[12px] text-[#1B3968] mb-4 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-                Account created! Check your <strong>{email}</strong> inbox to confirm your email, then{" "}
-                <a href="/signin" className="underline font-medium">sign in</a>.
               </p>
             )}
 
@@ -341,14 +211,14 @@ export default function SignUpPage() {
               disabled={loading}
               className="w-full py-2.5 rounded-lg bg-[#1B3968] text-white text-sm font-medium hover:opacity-90 transition-opacity mb-4 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {loading ? "Creating account…" : "Create account"}
+              {loading ? "Signing in…" : "Log in"}
             </button>
           </form>
 
           <p className="text-center text-[13px] text-[#5a6872]">
-            Already have an account?{" "}
-            <Link href="/signin" className="text-[#1B3968] font-medium hover:underline">
-              Log in
+            Don&apos;t have an account?{" "}
+            <Link href="/signup" className="text-[#1B3968] font-medium hover:underline">
+              Sign up
             </Link>
           </p>
         </div>
@@ -359,7 +229,6 @@ export default function SignUpPage() {
           <div className="absolute -top-14 -right-14 w-56 h-56 rounded-full bg-[#6A9879] opacity-10 pointer-events-none" />
           <div className="absolute -bottom-10 -left-10 w-40 h-40 rounded-full bg-[#6A9879] opacity-[0.07] pointer-events-none" />
 
-          {/* Top content */}
           <div className="relative z-10">
             <div className="flex items-center gap-2 mb-8">
               <SchoolIcon />
@@ -375,32 +244,16 @@ export default function SignUpPage() {
             </p>
 
             <div className="flex flex-col gap-5">
-              <Feature
-                icon={<CalendarIcon />}
-                title="AI schedule planner"
-                description="Syncs with Google Calendar and suggests courses for next quarter around your work schedule"
-              />
-              <Feature
-                icon={<UsersIcon />}
-                title="Study group matcher"
-                description="Matches you with classmates in the same course who share your free time blocks"
-              />
-              <Feature
-                icon={<MicroscopeIcon />}
-                title="Professor search"
-                description="Browse faculty by research area and generate a personalized cold email in one click"
-              />
+              <Feature icon={<CalendarIcon />} title="AI schedule planner" description="Syncs with Google Calendar and suggests courses for next quarter around your work schedule" />
+              <Feature icon={<UsersIcon />} title="Study group matcher" description="Matches you with classmates in the same course who share your free time blocks" />
+              <Feature icon={<MicroscopeIcon />} title="Professor search" description="Browse faculty by research area and generate a personalized cold email in one click" />
             </div>
           </div>
 
-          {/* Bottom pills */}
           <div className="relative z-10 border-t border-white/10 pt-4 mt-8">
             <div className="flex flex-wrap gap-2">
               {["Free to use", "UC Davis only", "No ads", "AI-powered"].map((pill) => (
-                <span
-                  key={pill}
-                  className="text-[11px] px-2.5 py-1 rounded-full bg-white/10 text-white/65"
-                >
+                <span key={pill} className="text-[11px] px-2.5 py-1 rounded-full bg-white/10 text-white/65">
                   {pill}
                 </span>
               ))}

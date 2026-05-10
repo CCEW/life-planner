@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import Link from "next/link";
+import Image from "next/image";
 
 // ─── Static placeholder data (replace with real API data later) ───────────────
 
@@ -28,15 +29,6 @@ function formatHour(h: number) {
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
-
-function BookIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A5BA9B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-    </svg>
-  );
-}
 
 function ArrowLeftIcon() {
   return (
@@ -103,14 +95,12 @@ export default function AggiematePage() {
       onMouseUp={handleMouseUp}
     >
       {/* ── Navbar ── */}
-      <nav className="bg-[#1B3968] px-8 py-3.5 flex items-center justify-between shrink-0">
+      <nav className="bg-[#B4E1FF] px-8 py-1.5 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-md bg-[#6A9879]/25 flex items-center justify-center">
-            <BookIcon />
-          </div>
-          <span className="text-white text-sm font-medium tracking-wide">Student Life Helper</span>
+          <Image src="/logo2.png" alt="Student Life Helper" width={100} height={100} className="object-contain" />
+          <span className="text-[#241715] text-[30px] font-medium tracking-wide">Student Life Helper</span>
         </div>
-        <Link href="/dashboard" className="flex items-center gap-1.5 text-white/70 text-[13px] hover:text-white transition-colors">
+        <Link href="/dashboard" className="flex items-center gap-1.5 text-[#2C1A1D] text-[13px] hover:text-[#2C1A1D]/70 transition-colors">
           <ArrowLeftIcon />
           Return to home page
         </Link>
@@ -181,7 +171,7 @@ export default function AggiematePage() {
 
                 {/* Hour rows */}
                 {HOURS.map((hour) => (
-                  <>
+                  <Fragment key={hour}>
                     {/* Time label */}
                     <div
                       key={`label-${hour}`}
@@ -210,7 +200,7 @@ export default function AggiematePage() {
                         />
                       );
                     })}
-                  </>
+                  </Fragment>
                 ))}
               </div>
 
