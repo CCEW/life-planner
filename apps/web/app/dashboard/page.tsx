@@ -110,9 +110,9 @@ export default async function DashboardPage() {
       {/* ── Navbar ── */}
       <nav className="bg-[#1B3968] px-8 py-1.5 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <Image src="/logo2.png" alt="Student Life Helper" width={70} height={70} className="object-contain" />
+          <Image src="/logo2.png" alt="AGGIE PLANNER" width={70} height={70} className="object-contain" />
           <span className="text-white text-[30px] font-medium tracking-wide">
-            Student Life Helper
+            AGGIE PLANNER
           </span>
         </div>
 
@@ -178,9 +178,9 @@ export default async function DashboardPage() {
       {/* ── Footer ── */}
       <footer className="px-8 py-4 border-t border-[#E5E7EB] flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Image src="/logo2.png" alt="Student Life Helper" width={24} height={24} className="object-contain" />
+          <Image src="/logo2.png" alt="AGGIE PLANNER" width={24} height={24} className="object-contain" />
           <p className="text-[12px] text-[#9CA3AF]">
-            Student Life Helper · UC Davis · Free to use
+            AGGIE PLANNER · UC Davis · Free to use
           </p>
         </div>
         <div className="flex items-center gap-4">

@@ -197,8 +197,8 @@ export default function SignUpPage() {
 
           {/* Logo */}
           <div className="flex items-center gap-2 mb-7">
-            <Image src="/logo2.png" alt="Student Life Helper" width={150} height={150} className="object-contain" />
-            <span className="text-[40px] font-medium text-[#1a1a1a]">Student Life Helper</span>
+            <Image src="/logo2.png" alt="AGGIE PLANNER" width={150} height={150} className="object-contain" />
+            <span className="text-[40px] font-medium text-[#1a1a1a]">AGGIE PLANNER</span>
           </div>
 
           <h1 className="text-[22px] font-medium text-[#1a1a1a] mb-1">Create your account</h1>
