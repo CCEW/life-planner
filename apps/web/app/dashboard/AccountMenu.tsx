@@ -64,9 +64,9 @@ export default function AccountMenu({ fullName }: { fullName: string }) {
         onClick={() => setOpen((current) => !current)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex items-center gap-3 rounded-full pl-2 pr-1 py-1 hover:bg-white/35 focus:outline-none focus:ring-2 focus:ring-[#1B3968]/20 transition-colors"
+        className="flex items-center gap-3 rounded-full pl-2 pr-1 py-1 hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white/30 transition-colors"
       >
-        <span className="text-[#241715]/70 text-[13px] hidden sm:block max-w-[180px] truncate">
+        <span className="text-white/85 text-[13px] hidden sm:block max-w-[180px] truncate">
           {fullName}
         </span>
         <span className="w-8 h-8 rounded-full bg-[#6A9879] flex items-center justify-center">
