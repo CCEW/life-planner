@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 
@@ -101,8 +102,44 @@ function Feature({ icon, title, description }: { icon: React.ReactNode; title: s
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+
 export default function SignInPage() {
+  const router = useRouter();
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      const res = await fetch(`${API_URL}/auth/signin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error ?? "Something went wrong. Please try again.");
+        return;
+      }
+
+      router.push("/dashboard");
+    } catch {
+      setError("Could not reach the server. Make sure the API is running.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-[#F4F2E8] p-4 sm:p-8">
@@ -120,40 +157,63 @@ export default function SignInPage() {
           <h1 className="text-[22px] font-medium text-[#1a1a1a] mb-1">Welcome back</h1>
           <p className="text-[13px] text-[#5a6872] mb-6">Sign in to your account to continue</p>
 
-          {/* Email */}
-          <Field label="UC Davis email">
-            <input type="email" placeholder="username@ucdavis.edu" className={inputClass} />
-          </Field>
-
-          {/* Password */}
-          <Field label="Password">
-            <div className="relative">
+          <form onSubmit={handleSubmit}>
+            {/* Email */}
+            <Field label="UC Davis email">
               <input
-                type={showPassword ? "text" : "password"}
-                placeholder="Enter your password"
-                className={`${inputClass} pr-9`}
+                type="email"
+                placeholder="username@ucdavis.edu"
+                className={inputClass}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
               />
-              <button
-                type="button"
-                aria-label="Toggle password visibility"
-                onClick={() => setShowPassword((v) => !v)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94AAA1] hover:text-[#1B3968] transition-colors"
-              >
-                {showPassword ? <EyeOffIcon /> : <EyeIcon />}
-              </button>
+            </Field>
+
+            {/* Password */}
+            <Field label="Password">
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Enter your password"
+                  className={`${inputClass} pr-9`}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  aria-label="Toggle password visibility"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94AAA1] hover:text-[#1B3968] transition-colors"
+                >
+                  {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+                </button>
+              </div>
+            </Field>
+
+            {/* Forgot password */}
+            <div className="flex justify-end mb-5">
+              <Link href="#" className="text-[12px] text-[#1B3968] font-medium hover:underline">
+                Forgot password?
+              </Link>
             </div>
-          </Field>
 
-          {/* Forgot password */}
-          <div className="flex justify-end mb-5">
-            <Link href="#" className="text-[12px] text-[#1B3968] font-medium hover:underline">
-              Forgot password?
-            </Link>
-          </div>
+            {/* Error */}
+            {error && (
+              <p className="text-[12px] text-red-600 mb-4 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {error}
+              </p>
+            )}
 
-          <button className="w-full py-2.5 rounded-lg bg-[#1B3968] text-white text-sm font-medium hover:opacity-90 transition-opacity mb-4">
-            Log in
-          </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-2.5 rounded-lg bg-[#1B3968] text-white text-sm font-medium hover:opacity-90 transition-opacity mb-4 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {loading ? "Signing in…" : "Log in"}
+            </button>
+          </form>
 
           <p className="text-center text-[13px] text-[#5a6872]">
             Don&apos;t have an account?{" "}
@@ -169,7 +229,6 @@ export default function SignInPage() {
           <div className="absolute -top-14 -right-14 w-56 h-56 rounded-full bg-[#6A9879] opacity-10 pointer-events-none" />
           <div className="absolute -bottom-10 -left-10 w-40 h-40 rounded-full bg-[#6A9879] opacity-[0.07] pointer-events-none" />
 
-          {/* Top content */}
           <div className="relative z-10">
             <div className="flex items-center gap-2 mb-8">
               <SchoolIcon />
@@ -185,32 +244,16 @@ export default function SignInPage() {
             </p>
 
             <div className="flex flex-col gap-5">
-              <Feature
-                icon={<CalendarIcon />}
-                title="AI schedule planner"
-                description="Syncs with Google Calendar and suggests courses for next quarter around your work schedule"
-              />
-              <Feature
-                icon={<UsersIcon />}
-                title="Study group matcher"
-                description="Matches you with classmates in the same course who share your free time blocks"
-              />
-              <Feature
-                icon={<MicroscopeIcon />}
-                title="Professor search"
-                description="Browse faculty by research area and generate a personalized cold email in one click"
-              />
+              <Feature icon={<CalendarIcon />} title="AI schedule planner" description="Syncs with Google Calendar and suggests courses for next quarter around your work schedule" />
+              <Feature icon={<UsersIcon />} title="Study group matcher" description="Matches you with classmates in the same course who share your free time blocks" />
+              <Feature icon={<MicroscopeIcon />} title="Professor search" description="Browse faculty by research area and generate a personalized cold email in one click" />
             </div>
           </div>
 
-          {/* Bottom pills */}
           <div className="relative z-10 border-t border-white/10 pt-4 mt-8">
             <div className="flex flex-wrap gap-2">
               {["Free to use", "UC Davis only", "No ads", "AI-powered"].map((pill) => (
-                <span
-                  key={pill}
-                  className="text-[11px] px-2.5 py-1 rounded-full bg-white/10 text-white/65"
-                >
+                <span key={pill} className="text-[11px] px-2.5 py-1 rounded-full bg-white/10 text-white/65">
                   {pill}
                 </span>
               ))}
