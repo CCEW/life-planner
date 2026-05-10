@@ -200,4 +200,3 @@ packages/db/engineering_requirement_course_descriptions.json
 packages/db/professor_matching_backend_handoff.md
 packages/db/undergrad_courses_all_with_ge.json
 packages/db/undergraduate_offered_classes_202610.json
-apps/api/scripts/loadEngineeringProfessors.ts
