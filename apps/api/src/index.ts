@@ -6,6 +6,8 @@ import path from "path";
 import googleCalendarRouter from "./routes/googleCalendar";
 import authRouter from "./routes/auth";
 import transcriptRouter from "./routes/transcript";
+import coursesRouter from "./routes/courses";
+import aggieMateRouter from "./routes/aggieMate";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
@@ -27,6 +29,12 @@ app.use(googleCalendarRouter);
 
 // ── Transcript PDF parsing ────────────────────────────────────────────────────
 app.use(transcriptRouter);
+
+// ── Course offerings from Supabase ───────────────────────────────────────────
+app.use(coursesRouter);
+
+// ── Aggie Mate study partner matching ────────────────────────────────────────
+app.use(aggieMateRouter);
 
 // ── Health check ─────────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => {

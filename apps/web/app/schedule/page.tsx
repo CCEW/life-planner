@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const TRANSCRIPT_COURSES_STORAGE_KEY = "life-planner:transcript-courses";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,7 +24,238 @@ type Course = {
   units: number | null;
   grade: string | null;
   quarter: string | null;
+  geCategories: string[];
+  writingCategories: string[];
 };
+
+type OfferedCourse = {
+  id: string;
+  termCode: string;
+  courseCode: string;
+  section: string | null;
+  crn: string | null;
+  title: string;
+  unitsMin: number | null;
+  unitsMax: number | null;
+  unitsText: string | null;
+  geCategories: string[];
+  writingCategories: string[];
+  instructors: string[];
+  meetings: { time_days?: string }[];
+  consentRequired: boolean | null;
+  openSeats: number;
+  waitlist: number;
+};
+
+type MajorRequirement = {
+  id: string;
+  name: string;
+  groupLabel: string | null;
+  subsection: string | null;
+  met: boolean;
+  progress: number;
+  required: number;
+  unitBased: boolean;
+  completedCourseCodes: string[];
+  candidateCourseCodes: string[];
+  missingCourseCodes: string[];
+  notes: string[];
+};
+
+type MajorAudit = {
+  major: {
+    id: string;
+    code: string | null;
+    name: string;
+    degree: string | null;
+    catalogYear: string | null;
+  };
+  summary: {
+    met: number;
+    total: number;
+  };
+  requirements: MajorRequirement[];
+};
+
+// ─── GE / Writing requirement checker ────────────────────────────────────────
+
+type ReqItem = { key: string; label: string; val: number; min: number; dividerBefore?: boolean };
+
+function computeRequirements(courses: Course[]): ReqItem[] {
+  const ge: Record<string, number> = {};
+  const wr: Record<string, number> = {};
+  for (const c of courses) {
+    // Only count completed courses; skip in-progress, no-pass, and withdrawals
+    if (!c.units || !c.grade || ["IP", "NP", "W"].includes(c.grade)) continue;
+    for (const g of (c.geCategories ?? [])) ge[g] = (ge[g] ?? 0) + c.units;
+    for (const w of (c.writingCategories ?? [])) wr[w] = (wr[w] ?? 0) + c.units;
+  }
+  const AH = ge["AH"] ?? 0;
+  const SS = ge["SS"] ?? 0;
+  const SE = ge["SE"] ?? 0;
+  // Each category caps at 20 units toward the 52-unit total
+  const cappedTotal = Math.min(AH, 20) + Math.min(SS, 20) + Math.min(SE, 20);
+  const WE = wr["WE"] ?? 0;
+  const OL = wr["OL"] ?? 0;
+  return [
+    // ── Topical Breadth ──────────────────────────────────────────────────────
+    { key: "AH",    label: "Arts & Humanities (AH)",          val: AH,          min: 12 },
+    { key: "SS",    label: "Social Sciences (SS)",             val: SS,          min: 12 },
+    { key: "SE",    label: "Science & Engineering (SE)",       val: SE,          min: 12 },
+    { key: "total", label: "Total Topical Breadth", val: cappedTotal, min: 52 },
+    // ── Writing / Core Literacy ───────────────────────────────────────────────
+    { key: "WE",    label: "Writing Experience (WE)",          val: WE,      min: 6,  dividerBefore: true },
+    { key: "WE+OL", label: "WE + Oral Literacy",               val: WE + OL, min: 9  },
+    { key: "VL",    label: "Visual Literacy (VL)",             val: wr["VL"]   ?? 0, min: 3 },
+    { key: "ACGH",  label: "Am. Cultures, Gov & Hist (ACGH)",  val: wr["ACGH"] ?? 0, min: 3 },
+    { key: "DD",    label: "Domestic Diversity (DD)",          val: wr["DD"]   ?? 0, min: 3 },
+    { key: "WC",    label: "World Cultures (WC)",              val: wr["WC"]   ?? 0, min: 3 },
+    { key: "QL",    label: "Quantitative Literacy (QL)",       val: wr["QL"]   ?? 0, min: 3 },
+    { key: "SL",    label: "Scientific Literacy (SL)",         val: wr["SL"]   ?? 0, min: 3 },
+  ];
+}
+
+type CourseSuggestion = OfferedCourse & {
+  matchedRequirementLabels: string[];
+  score: number;
+};
+
+type MajorCourseSuggestion = OfferedCourse & {
+  matchedRequirementNames: string[];
+  score: number;
+};
+
+type RequirementSuggestion = OfferedCourse & {
+  matchedRequirementLabels?: string[];
+  matchedRequirementNames?: string[];
+  score: number;
+};
+
+type RequirementsTab = "ge" | "major";
+
+function normalizeCourseCode(code: string): string {
+  const compact = code.replace(/\s+/g, "").toUpperCase();
+  const match = compact.match(/^([A-Z]{2,4})0*(\d+)([A-Z].*)?$/);
+  if (!match) return compact;
+  return `${match[1]}${match[2]}${match[3] ?? ""}`;
+}
+
+function getCourseUnits(course: Pick<OfferedCourse, "unitsMin" | "unitsMax" | "unitsText">): string {
+  if (course.unitsText) return course.unitsText.replace(/\.0$/, "");
+  if (course.unitsMin && course.unitsMax && course.unitsMin !== course.unitsMax) {
+    return `${course.unitsMin}-${course.unitsMax}`;
+  }
+  return course.unitsMin ? String(course.unitsMin) : "—";
+}
+
+function formatMeetings(meetings?: OfferedCourse["meetings"]): string {
+  const times = (meetings ?? [])
+    .map((meeting) => meeting.time_days)
+    .filter((time): time is string => Boolean(time));
+  return times.length > 0 ? times.join(" · ") : "Time TBA";
+}
+
+function hasProperMeetingTimes(meetings?: OfferedCourse["meetings"]): boolean {
+  return (meetings ?? []).some((meeting) => {
+    const timeDays = meeting.time_days?.trim() ?? "";
+    return /\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\s*(AM|PM)/i.test(timeDays);
+  });
+}
+
+function recommendGeCourses(courses: Course[], offerings: OfferedCourse[], addedIds: Set<string>): CourseSuggestion[] {
+  const reqs = computeRequirements(courses);
+  const reqMap = Object.fromEntries(reqs.map((r) => [r.key, r]));
+  const unmetReqs = reqs.filter((r) => r.val < r.min);
+  const topicalKeys = ["AH", "SS", "SE"];
+  const taken = new Set(courses.map((c) => normalizeCourseCode(c.courseCode)));
+
+  const needs = unmetReqs.flatMap((req) => {
+    if (topicalKeys.includes(req.key)) {
+      return [{ source: "ge" as const, category: req.key, label: req.label }];
+    }
+    if (req.key === "total") {
+      return topicalKeys
+        .filter((key) => (reqMap[key]?.val ?? 0) < 20)
+        .map((key) => ({ source: "ge" as const, category: key, label: req.label }));
+    }
+    if (req.key === "WE+OL") {
+      return ["WE", "OL"].map((category) => ({ source: "writing" as const, category, label: req.label }));
+    }
+    return [{ source: "writing" as const, category: req.key, label: req.label }];
+  });
+
+  if (needs.length === 0) return [];
+
+  return offerings
+    .filter((course) => (
+      course.openSeats > 0 &&
+      !course.consentRequired &&
+      hasProperMeetingTimes(course.meetings) &&
+      !addedIds.has(course.id) &&
+      !taken.has(normalizeCourseCode(course.courseCode))
+    ))
+    .map((course) => {
+      const matchedRequirementLabels = Array.from(new Set(
+        needs
+          .filter((need) => (
+            need.source === "ge"
+              ? course.geCategories.includes(need.category)
+              : course.writingCategories.includes(need.category)
+          ))
+          .map((need) => need.label)
+      ));
+
+      return {
+        ...course,
+        matchedRequirementLabels,
+        score: (matchedRequirementLabels.length * 100) + Math.min(course.openSeats, 40),
+      };
+    })
+    .filter((course) => course.matchedRequirementLabels.length > 0)
+    .sort((a, b) => b.score - a.score || b.openSeats - a.openSeats || a.courseCode.localeCompare(b.courseCode))
+    .slice(0, 6);
+}
+
+function recommendMajorCourses(courses: Course[], offerings: OfferedCourse[], audit: MajorAudit | null, addedIds: Set<string>): MajorCourseSuggestion[] {
+  if (!audit) return [];
+  const taken = new Set(courses.map((c) => normalizeCourseCode(c.courseCode)));
+  const unmetRequirements = audit.requirements.filter((requirement) => !requirement.met);
+  const needsByCode = new Map<string, string[]>();
+
+  for (const requirement of unmetRequirements) {
+    for (const code of requirement.candidateCourseCodes) {
+      const normalized = normalizeCourseCode(code);
+      if (taken.has(normalized)) continue;
+      needsByCode.set(normalized, [...(needsByCode.get(normalized) ?? []), requirement.name]);
+    }
+  }
+
+  if (needsByCode.size === 0) return [];
+
+  return offerings
+    .filter((course) => (
+      course.openSeats > 0 &&
+      !course.consentRequired &&
+      hasProperMeetingTimes(course.meetings) &&
+      !addedIds.has(course.id) &&
+      !taken.has(normalizeCourseCode(course.courseCode)) &&
+      needsByCode.has(normalizeCourseCode(course.courseCode))
+    ))
+    .map((course) => {
+      const matchedRequirementNames = Array.from(new Set(needsByCode.get(normalizeCourseCode(course.courseCode)) ?? []));
+      return {
+        ...course,
+        matchedRequirementNames,
+        score: (matchedRequirementNames.length * 100) + Math.min(course.openSeats, 40),
+      };
+    })
+    .sort((a, b) => b.score - a.score || b.openSeats - a.openSeats || a.courseCode.localeCompare(b.courseCode))
+    .slice(0, 6);
+}
+
+function suggestionMatches(course: RequirementSuggestion): string[] {
+  return course.matchedRequirementNames ?? course.matchedRequirementLabels ?? [];
+}
 
 // ─── Week helpers ─────────────────────────────────────────────────────────────
 
@@ -164,7 +396,26 @@ export default function SchedulePlannerPage() {
   const [courses,         setCourses]         = useState<Course[]>([]);
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [transcriptError,   setTranscriptError]   = useState<string | null>(null);
+  const [geOfferings, setGeOfferings] = useState<OfferedCourse[]>([]);
+  const [geOfferingsLoading, setGeOfferingsLoading] = useState(true);
+  const [geOfferingsError, setGeOfferingsError] = useState<string | null>(null);
+  const [plannedCourses, setPlannedCourses] = useState<OfferedCourse[]>([]);
+  const [requirementsTab, setRequirementsTab] = useState<RequirementsTab>("ge");
+  const [studentMajor, setStudentMajor] = useState<string | null>(null);
+  const [majorAudit, setMajorAudit] = useState<MajorAudit | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const plannedCourseIds = useMemo(
+    () => new Set(plannedCourses.map((course) => course.id)),
+    [plannedCourses]
+  );
+  const geSuggestions = useMemo(
+    () => recommendGeCourses(courses, geOfferings, plannedCourseIds),
+    [courses, geOfferings, plannedCourseIds]
+  );
+  const majorSuggestions = useMemo(
+    () => recommendMajorCourses(courses, geOfferings, majorAudit, plannedCourseIds),
+    [courses, geOfferings, majorAudit, plannedCourseIds]
+  );
 
   async function handleTranscriptUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -182,6 +433,9 @@ export default function SchedulePlannerPage() {
       const data = await res.json();
       if (!res.ok) { setTranscriptError(data.error ?? "Upload failed."); return; }
       setCourses(data.courses ?? []);
+      localStorage.setItem(TRANSCRIPT_COURSES_STORAGE_KEY, JSON.stringify(data.courses ?? []));
+      setStudentMajor(data.major ?? data.majorAudit?.major?.name ?? null);
+      setMajorAudit(data.majorAudit ?? null);
     } catch {
       setTranscriptError("Could not reach the server.");
     } finally {
@@ -217,13 +471,24 @@ export default function SchedulePlannerPage() {
   useEffect(() => {
     const conn = searchParams.get("connected");
     const err  = searchParams.get("error");
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const scheduleFetchEvents = () => {
+      timers.push(setTimeout(() => {
+        fetchEvents();
+      }, 0));
+    };
+    const scheduleError = (message: string) => {
+      timers.push(setTimeout(() => {
+        setError(message);
+      }, 0));
+    };
 
     if (conn === "true") {
       // Clean URL then load events
       router.replace("/schedule");
-      fetchEvents();
+      scheduleFetchEvents();
     } else if (err) {
-      setError(
+      scheduleError(
         err === "oauth_failed"
           ? "Google sign-in failed. Please try again."
           : "Something went wrong. Please try again."
@@ -231,15 +496,53 @@ export default function SchedulePlannerPage() {
       router.replace("/schedule");
     } else {
       // Check if already connected (cookie may still be valid)
-      fetchEvents();
+      scheduleFetchEvents();
     }
+
+    return () => {
+      timers.forEach(clearTimeout);
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    async function loadGeOfferings() {
+      setGeOfferingsLoading(true);
+      setGeOfferingsError(null);
+      try {
+        const res = await fetch(`${API}/api/courses/offered?termCode=202610&scope=all`, {
+          credentials: "include",
+        });
+        if (!res.ok) throw new Error("ge_offerings_failed");
+        const data = await res.json();
+        setGeOfferings(Array.isArray(data.courses) ? data.courses : []);
+      } catch {
+        setGeOfferingsError("Could not load next-quarter GE offerings.");
+      } finally {
+        setGeOfferingsLoading(false);
+      }
+    }
+
+    loadGeOfferings();
+  }, []);
+
+  function handleAddPlannedCourse(course: OfferedCourse) {
+    setPlannedCourses((current) => (
+      current.some((item) => item.id === course.id) ? current : [...current, course]
+    ));
+  }
+
+  function handleRemovePlannedCourse(courseId: string) {
+    setPlannedCourses((current) => current.filter((course) => course.id !== courseId));
+  }
 
   async function handleDisconnect() {
     await fetch(`${API}/api/calendar/disconnect`, { method: "POST", credentials: "include" });
     setConnected(false);
     setEvents([]);
   }
+
+  const showingMajorSuggestions = requirementsTab === "major";
+  const requirementSuggestions: RequirementSuggestion[] = showingMajorSuggestions ? majorSuggestions : geSuggestions;
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F4F2E8]">
@@ -374,14 +677,41 @@ export default function SchedulePlannerPage() {
 
           {/* Suggested study schedule */}
           <Panel label="Your suggested study schedule" className="flex flex-col flex-1">
-            <div className="rounded-xl border border-dashed border-[#B3C1BB]/70 bg-white/60 flex flex-col items-center justify-center gap-3 py-16 min-h-[220px]">
-              <ClockIcon />
-              <p className="text-[14px] font-medium text-[#94AAA1]">Study Schedule</p>
-              <p className="text-[12px] text-[#B3C1BB] text-center max-w-[220px] leading-relaxed">
-                {connected
-                  ? "Your AI-generated study schedule will appear here based on your calendar and courses."
-                  : "Connect Google Calendar first to generate a personalized study schedule."}
-              </p>
+            <div className="min-h-[220px]">
+              {plannedCourses.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-[#B3C1BB]/70 bg-white/60 flex flex-col items-center justify-center gap-3 py-16 min-h-[220px]">
+                  <ClockIcon />
+                  <p className="text-[14px] font-medium text-[#94AAA1]">Study Schedule</p>
+                  <p className="text-[12px] text-[#B3C1BB] text-center max-w-[220px] leading-relaxed">
+                    Add recommended GE courses to start building your next-quarter schedule.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2 max-h-[360px] overflow-y-auto">
+                  {plannedCourses.map((course) => (
+                    <div key={course.id} className="rounded-lg bg-white/70 border border-[#B3C1BB]/30 px-3 py-2.5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[12px] font-bold text-[#1B3968]">
+                            {course.courseCode}{course.section ? ` ${course.section}` : ""}
+                          </p>
+                          <p className="text-[11px] text-[#1a1a1a] truncate">{course.title}</p>
+                        </div>
+                        <button
+                          onClick={() => handleRemovePlannedCourse(course.id)}
+                          className="text-[11px] text-[#94AAA1] hover:text-red-400 transition-colors shrink-0"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-[#5a6872] mt-1">{formatMeetings(course.meetings)}</p>
+                      <p className="text-[10px] text-[#94AAA1] mt-1">
+                        {course.instructors.length > 0 ? course.instructors.join(", ") : "Instructor TBA"} · CRN {course.crn ?? "TBA"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </Panel>
         </div>
@@ -421,7 +751,13 @@ export default function SchedulePlannerPage() {
                 <div className="flex items-center justify-between mb-1">
                   <p className="text-[11px] text-[#94AAA1]">{courses.length} course{courses.length !== 1 ? "s" : ""} found</p>
                   <button
-                    onClick={() => { setCourses([]); setTranscriptError(null); }}
+                    onClick={() => {
+                      setCourses([]);
+                      setTranscriptError(null);
+                      setStudentMajor(null);
+                      setMajorAudit(null);
+                      localStorage.removeItem(TRANSCRIPT_COURSES_STORAGE_KEY);
+                    }}
                     className="text-[11px] text-[#94AAA1] hover:text-red-400 transition-colors"
                   >
                     Clear
@@ -430,10 +766,20 @@ export default function SchedulePlannerPage() {
                 <div className="overflow-y-auto max-h-52 flex flex-col gap-1">
                   {[...courses].sort((a, b) => quarterKey(b.quarter) - quarterKey(a.quarter)).map((c, i) => (
                     <div key={i} className="flex items-center justify-between px-2.5 py-2 rounded-lg bg-white/70 border border-[#B3C1BB]/30">
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <p className="text-[12px] font-bold text-[#1B3968]">{c.courseCode}</p>
                         <p className="text-[11px] text-[#1a1a1a] truncate">{c.title}</p>
                         <p className="text-[10px] text-[#94AAA1]">{c.quarter ?? "—"}</p>
+                        {(c.geCategories?.length > 0 || c.writingCategories?.length > 0) && (
+                          <div className="flex flex-wrap gap-0.5 mt-1">
+                            {c.geCategories?.map((g) => (
+                              <span key={g} className="text-[9px] px-1 py-0.5 rounded bg-[#1B3968]/10 text-[#1B3968] font-medium">{g}</span>
+                            ))}
+                            {c.writingCategories?.map((w) => (
+                              <span key={w} className="text-[9px] px-1 py-0.5 rounded bg-[#6A9879]/15 text-[#487A62] font-medium">{w}</span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       {c.grade && (
                         <span className="text-[11px] font-bold text-[#487A62] shrink-0 ml-2">{c.grade}</span>
@@ -451,21 +797,168 @@ export default function SchedulePlannerPage() {
             )}
           </Panel>
 
-          <Panel label="Courses still needed" className="flex flex-col">
-            <div className="min-h-[110px] flex items-center justify-center">
-              <p className="text-[12px] text-[#B3C1BB]">Upload your transcript to see pending courses</p>
+          <Panel label="Requirements" className="flex flex-col">
+            <div className="grid grid-cols-2 gap-1 rounded-lg bg-white/70 border border-[#B3C1BB]/30 p-1 mb-3">
+              {[
+                { key: "ge" as const, label: "GE" },
+                { key: "major" as const, label: "Major" },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setRequirementsTab(tab.key)}
+                  className={`text-[12px] font-medium rounded-md py-1.5 transition-colors ${
+                    requirementsTab === tab.key
+                      ? "bg-[#1B3968] text-white"
+                      : "text-[#5a6872] hover:text-[#1B3968]"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
             </div>
+
+            {requirementsTab === "ge" ? (
+              courses.length === 0 ? (
+                <div className="min-h-[110px] flex items-center justify-center">
+                  <p className="text-[12px] text-[#B3C1BB]">Upload your transcript to check requirements</p>
+                </div>
+              ) : (() => {
+                const reqs = computeRequirements(courses);
+                const ReqRow = ({ label, val, min }: { label: string; val: number; min: number }) => {
+                  const met = val >= min;
+                  return (
+                    <div className="flex items-center justify-between py-1 border-b border-[#B3C1BB]/20 last:border-0">
+                      <span className="text-[11px] text-[#1a1a1a]">{label}</span>
+                      <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                        <span className="text-[11px] text-[#5a6872]">{val}/{min}+ u</span>
+                        <span className={`text-[10px] font-bold ${met ? "text-[#487A62]" : "text-red-400"}`}>
+                          {met ? "✓" : "✗"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                };
+                return (
+                  <div className="flex flex-col">
+                    {reqs.map((r) => (
+                      <div key={r.key}>
+                        {r.dividerBefore && <hr className="my-2 border-[#B3C1BB]/40" />}
+                        <ReqRow label={r.label} val={r.val} min={r.min} />
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()
+            ) : (
+              courses.length === 0 ? (
+                <div className="min-h-[110px] flex items-center justify-center">
+                  <p className="text-[12px] text-[#B3C1BB]">Upload your transcript to check requirements</p>
+                </div>
+              ) : !majorAudit ? (
+                <div className="min-h-[110px] flex items-center justify-center">
+                  <p className="text-[12px] text-[#B3C1BB] text-center px-2">
+                    {studentMajor
+                      ? `No structured requirements found for ${studentMajor}.`
+                      : "No major detected on this transcript."}
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-col">
+                  <div className="mb-2 pb-2 border-b border-[#B3C1BB]/30">
+                    <p className="text-[12px] font-bold text-[#1B3968]">
+                      {majorAudit.major.name}{majorAudit.major.degree ? ` ${majorAudit.major.degree}` : ""}
+                    </p>
+                    <p className="text-[10px] text-[#94AAA1]">
+                      {majorAudit.summary.met}/{majorAudit.summary.total} requirements met{majorAudit.major.catalogYear ? ` · ${majorAudit.major.catalogYear}` : ""}
+                    </p>
+                  </div>
+                  <div className="max-h-60 overflow-y-auto">
+                    {majorAudit.requirements.map((requirement) => (
+                      <div key={requirement.id} className="py-1.5 border-b border-[#B3C1BB]/20 last:border-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-[11px] text-[#1a1a1a] leading-tight">{requirement.name}</p>
+                            {requirement.groupLabel && (
+                              <p className="text-[9px] text-[#94AAA1] mt-0.5">{requirement.groupLabel}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-[11px] text-[#5a6872]">
+                              {requirement.progress}/{requirement.required}{requirement.unitBased ? " u" : ""}
+                            </span>
+                            <span className={`text-[10px] font-bold ${requirement.met ? "text-[#487A62]" : "text-red-400"}`}>
+                              {requirement.met ? "✓" : "✗"}
+                            </span>
+                          </div>
+                        </div>
+                        {!requirement.met && requirement.missingCourseCodes.length > 0 && (
+                          <p className="text-[9px] text-[#94AAA1] mt-1 line-clamp-2">
+                            Options: {requirement.missingCourseCodes.slice(0, 8).join(", ")}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            )}
           </Panel>
 
           <Panel label="Next quarter suggestions" className="flex flex-col">
             <div className="min-h-[140px] flex flex-col gap-2 pt-1">
-              {["Major requirements", "General education requirements"].map((item) => (
-                <div key={item} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-white/70 border border-[#B3C1BB]/30">
-                  <div className="w-1.5 h-1.5 rounded-full bg-[#6A9879] shrink-0" />
-                  <span className="text-[13px] text-[#1a1a1a]">{item}</span>
-                </div>
-              ))}
-              <p className="text-[11px] text-[#B3C1BB] mt-1 px-1">Suggestions refine once your transcript is uploaded.</p>
+              {courses.length === 0 ? (
+                <p className="text-[12px] text-[#B3C1BB] text-center py-8 px-2">
+                  Upload your transcript to get course suggestions for Fall 2026.
+                </p>
+              ) : geOfferingsLoading ? (
+                <p className="text-[12px] text-[#94AAA1] text-center py-8 animate-pulse">Loading course offerings…</p>
+              ) : geOfferingsError ? (
+                <p className="text-[11px] text-red-400 text-center py-8 px-2">{geOfferingsError}</p>
+              ) : showingMajorSuggestions && !majorAudit ? (
+                <p className="text-[12px] text-[#B3C1BB] text-center py-8 px-2">
+                  Major suggestions appear once a supported major is detected.
+                </p>
+              ) : requirementSuggestions.length === 0 ? (
+                <p className="text-[12px] text-[#487A62] text-center py-8 px-2">
+                  Your current transcript meets the tracked {showingMajorSuggestions ? "major" : "GE"} requirements.
+                </p>
+              ) : (
+                <>
+                  {requirementSuggestions.map((course) => (
+                    <div key={course.id} className="px-3 py-2.5 rounded-lg bg-white/70 border border-[#B3C1BB]/30">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-[12px] font-bold text-[#1B3968]">
+                            {course.courseCode}{course.section ? ` ${course.section}` : ""}
+                          </p>
+                          <p className="text-[11px] text-[#1a1a1a] truncate">{course.title}</p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[10px] text-[#5a6872]">{getCourseUnits(course)} u</span>
+                          <button
+                            onClick={() => handleAddPlannedCourse(course)}
+                            className="px-2 py-1 rounded-md bg-[#1B3968] text-white text-[10px] font-medium hover:opacity-90 transition-opacity"
+                          >
+                            Add
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-[#5a6872] mt-1.5">{formatMeetings(course.meetings)}</p>
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {[...course.geCategories, ...course.writingCategories].map((tag) => (
+                          <span key={tag} className="text-[9px] px-1 py-0.5 rounded bg-[#6A9879]/15 text-[#487A62] font-medium">{tag}</span>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-[#94AAA1] mt-1.5">
+                        Covers {suggestionMatches(course).join(", ")} · {course.openSeats} open seat{course.openSeats !== 1 ? "s" : ""} · CRN {course.crn ?? "TBA"}
+                      </p>
+                    </div>
+                  ))}
+                  <p className="text-[10px] text-[#B3C1BB] px-1">
+                    Matched to {showingMajorSuggestions ? "major" : "GE"} requirement rows currently marked ✗.
+                  </p>
+                </>
+              )}
             </div>
           </Panel>
 
