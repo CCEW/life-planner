@@ -104,6 +104,12 @@ function Feature({ icon, title, description }: { icon: React.ReactNode; title: s
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
+function clearUserScopedStorage() {
+  for (const key of Object.keys(localStorage)) {
+    if (key === "token" || key.startsWith("life-planner:")) localStorage.removeItem(key);
+  }
+}
+
 export default function SignInPage() {
   const router = useRouter();
 
@@ -131,6 +137,11 @@ export default function SignInPage() {
       if (!res.ok) {
         setError(data.error ?? "Something went wrong. Please try again.");
         return;
+      }
+
+      if (data.token) {
+        clearUserScopedStorage();
+        localStorage.setItem("token", data.token);
       }
 
       router.push("/dashboard");

@@ -118,6 +118,12 @@ function Feature({
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
+function clearUserScopedStorage() {
+  for (const key of Object.keys(localStorage)) {
+    if (key === "token" || key.startsWith("life-planner:")) localStorage.removeItem(key);
+  }
+}
+
 export default function SignUpPage() {
   const router = useRouter();
 
@@ -167,6 +173,11 @@ export default function SignUpPage() {
       if (data.needsEmailConfirmation) {
         setNeedsConfirmation(true);
         return;
+      }
+
+      if (data.token) {
+        clearUserScopedStorage();
+        localStorage.setItem("token", data.token);
       }
 
       router.push("/dashboard");

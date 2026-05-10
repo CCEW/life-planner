@@ -1,9 +1,21 @@
 import Link from "next/link";
 import Image from "next/image";
+import { cookies } from "next/headers";
+import AccountMenu from "./AccountMenu";
 
-// ─── Data ─────────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const USERNAME = "Alex";
+async function getFullName(): Promise<string> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get("token")?.value;
+  if (!token) return "there";
+  try {
+    const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64").toString());
+    return payload.user_metadata?.full_name ?? payload.email ?? "there";
+  } catch {
+    return "there";
+  }
+}
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -90,7 +102,8 @@ const features = [
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  const fullName = await getFullName();
   return (
     <div className="min-h-screen flex flex-col bg-[#F4F2E8]">
 
@@ -103,12 +116,7 @@ export default function DashboardPage() {
           </span>
         </div>
 
-        <div className="flex items-center gap-3">
-          <span className="text-[#241715]/70 text-[13px] hidden sm:block">{USERNAME}</span>
-          <div className="w-8 h-8 rounded-full bg-[#6A9879] flex items-center justify-center">
-            <span className="text-white text-xs font-semibold">{USERNAME[0]}</span>
-          </div>
-        </div>
+        <AccountMenu fullName={fullName} />
       </nav>
 
       {/* ── Main content ── */}
@@ -116,7 +124,7 @@ export default function DashboardPage() {
 
         {/* Greeting */}
         <h1 className="text-[28px] sm:text-[36px] font-bold text-[#1a1a1a] mb-2 text-center leading-tight">
-          Welcome back, <span className="text-[#487A62]">{USERNAME}</span> — what would you like to do today?
+          Welcome back, <span className="text-[#487A62]">{fullName}</span> — what would you like to do today?
         </h1>
         <p className="text-[15px] text-[#6B7280] mb-10 text-center">
           Choose a tool to get started.

@@ -21,20 +21,128 @@ type Professor = {
   phoneNumber?: string;
   personalSite?: string;
   sourceUrl?: string;
+  departmentSubjects?: string[];
+  topicScores?: Record<string, unknown>;
+  topicKeywordHits?: Record<string, unknown>;
   topMatchedRequirementCourses?: unknown[];
 };
 
+type TranscriptCourse = {
+  courseCode?: string;
+  title?: string;
+  grade?: string;
+  units?: number;
+  quarter?: string;
+  geCategories?: string[];
+  writingCategories?: string[];
+};
+
+type CompatibilityResult = {
+  score: number | null;
+  summary: string;
+  details: string[];
+};
+
 type SortOption = "name-asc" | "name-desc" | "compatibility";
+type CopyTarget = "idle" | "email" | "subject" | "body";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
+const STOP_WORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "based", "by", "course", "courses", "data", "design", "for", "from", "in",
+  "intro", "introduction", "lab", "laboratory", "methods", "model", "models", "of", "on", "or", "part", "principles",
+  "science", "sciences", "seminar", "special", "study", "systems", "technology", "the", "to", "topics", "using", "with",
+]);
 
-function compatibilitySummary(): string {
-  return "Compatibility will appear after transcript/course history is available. This page only loads professor and course-match data for now.";
-}
+const GRADE_POINTS: Record<string, number> = {
+  "A+": 4,
+  A: 4,
+  "A-": 3.7,
+  "B+": 3.3,
+  B: 3,
+  "B-": 2.7,
+  "C+": 2.3,
+  C: 2,
+  "C-": 1.7,
+  "D+": 1.3,
+  D: 1,
+  "D-": 0.7,
+  F: 0,
+};
 
 function cleanDisplay(value: string | null | undefined): string {
   const cleaned = value?.trim() ?? "";
   return cleaned.toLowerCase() === "info not applicable" ? "" : cleaned;
+}
+
+function professorKey(professor: Professor): string {
+  return professor.id ?? professor.email ?? professor.sourceUrl ?? professor.name;
+}
+
+function normalizeCourseCode(value: string | null | undefined): string {
+  const cleaned = cleanDisplay(value)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+  const match = cleaned.match(/^([A-Z]{2,4})\s*0*([0-9]+[A-Z]*)$/);
+  return match ? `${match[1]} ${match[2]}` : cleaned.replace(/\s+/g, " ");
+}
+
+function courseSubject(value: string | null | undefined): string {
+  return normalizeCourseCode(value).match(/^([A-Z]{2,4})\b/)?.[1] ?? "";
+}
+
+function normalizeKeyword(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token.length > 2)
+    .map((token) => token.replace(/(?:ing|ies|s)$/i, (suffix) => (suffix === "ies" ? "y" : "")))
+    .filter((token) => token.length > 2 && !STOP_WORDS.has(token))
+    .join(" ");
+}
+
+function keywordTokens(values: Array<string | null | undefined>): Set<string> {
+  return new Set(
+    values
+      .flatMap((value) => normalizeKeyword(cleanDisplay(value)).split(/\s+/))
+      .filter(Boolean)
+  );
+}
+
+function gradePoints(grade: string | null | undefined): number | null {
+  const normalized = cleanDisplay(grade).toUpperCase();
+  if (!normalized || ["W", "I", "NG", "Y"].includes(normalized)) {
+    return null;
+  }
+  if (normalized === "P" || normalized === "S" || normalized === "IP") {
+    return 3.2;
+  }
+  if (normalized === "NP" || normalized === "U") {
+    return 0;
+  }
+  return GRADE_POINTS[normalized] ?? null;
+}
+
+function gradeMultiplier(grade: string | null | undefined): number {
+  const points = gradePoints(grade);
+  if (points === null) {
+    return 0.75;
+  }
+  if (points <= 0) {
+    return 0;
+  }
+  return 0.65 + Math.min(points, 4) / 4 * 0.45;
+}
+
+function isUsableTranscriptCourse(course: TranscriptCourse): boolean {
+  const normalized = cleanDisplay(course.grade).toUpperCase();
+  return Boolean(normalizeCourseCode(course.courseCode)) && !["F", "NP", "U", "W"].includes(normalized);
+}
+
+function courseUnits(course: TranscriptCourse): number {
+  return typeof course.units === "number" && Number.isFinite(course.units) ? Math.max(course.units, 1) : 4;
 }
 
 function joinDisplay(values: Array<string | null | undefined>): string {
@@ -83,6 +191,181 @@ function professorMatchesQuery(professor: Professor, query: string): boolean {
   ];
 
   return fields.some((field) => exactWordSearchMatch(field, query));
+}
+
+function stringArrayFromRecord(record: Record<string, unknown>, keys: string[]): string[] {
+  return keys.flatMap((key) => {
+    const value = record[key];
+    if (Array.isArray(value)) {
+      return value.filter((item): item is string => typeof item === "string");
+    }
+    return typeof value === "string" ? [value] : [];
+  });
+}
+
+function professorCourseRecords(professor: Professor) {
+  return (professor.topMatchedRequirementCourses ?? [])
+    .filter((course): course is Record<string, unknown> => Boolean(course) && typeof course === "object");
+}
+
+function professorCourseCode(record: Record<string, unknown>): string {
+  const value = record.course_code ?? record.courseCode ?? record.code;
+  return typeof value === "string" ? value : "";
+}
+
+function professorCourseTitle(record: Record<string, unknown>): string {
+  const value = record.course_title ?? record.courseTitle ?? record.title;
+  return typeof value === "string" ? value : "";
+}
+
+function professorCourseScore(record: Record<string, unknown>): number {
+  const value = record.score;
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(value, 100)) : 60;
+}
+
+function departmentSubjects(professor: Professor): string[] {
+  const explicit = (professor.departmentSubjects ?? []).map((subject) => subject.toUpperCase()).filter(Boolean);
+  if (explicit.length > 0) {
+    return explicit;
+  }
+
+  const department = cleanDisplay(professor.department ?? professor.dept).toLowerCase();
+  if (department.includes("computer science")) return ["ECS"];
+  if (department.includes("electrical") || department.includes("computer engineering")) return ["EEC"];
+  if (department.includes("civil") || department.includes("environmental")) return ["ECI"];
+  if (department.includes("mechanical") || department.includes("aerospace")) return ["EME", "EAE"];
+  if (department.includes("chemical")) return ["ECH"];
+  if (department.includes("biomedical")) return ["BIM"];
+  if (department.includes("biological") || department.includes("agricultural")) return ["EBS"];
+  if (department.includes("materials")) return ["EMS"];
+  return [];
+}
+
+function gradeLabel(points: number): string {
+  if (points >= 3.85) return "A range";
+  if (points >= 3.15) return "B+/A- range";
+  if (points >= 2.65) return "B range";
+  if (points >= 2) return "C range";
+  return "below C range";
+}
+
+function compatibilityColor(score: number | null): string {
+  if (score === null) return "#94AAA1";
+  if (score >= 80) return "#16864D";
+  if (score >= 65) return "#55A469";
+  if (score >= 45) return "#D0A53A";
+  return "#B35C5C";
+}
+
+function authHeaders(): HeadersInit {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  const token = window.localStorage.getItem("token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function calculateCompatibility(professor: Professor, transcriptCourses: TranscriptCourse[]): CompatibilityResult {
+  const usableCourses = transcriptCourses.filter(isUsableTranscriptCourse);
+  if (usableCourses.length === 0) {
+    return {
+      score: null,
+      summary: "Upload or parse a transcript first so compatibility can use your course history.",
+      details: ["No usable transcript courses were found for this account."],
+    };
+  }
+
+  const transcriptByCode = new Map(usableCourses.map((course) => [normalizeCourseCode(course.courseCode), course]));
+  const professorRecords = professorCourseRecords(professor);
+  const professorTerms = keywordTokens([
+    professor.name,
+    professor.department,
+    professor.dept,
+    professor.about,
+    professor.labDescription,
+    ...(professor.interests ?? []),
+    ...professorRecords.flatMap((record) => [
+      professorCourseTitle(record),
+      ...stringArrayFromRecord(record, ["matched_topic_labels", "matchedTopicLabels", "evidence_terms", "evidenceTerms"]),
+    ]),
+  ]);
+  const subjects = new Set(departmentSubjects(professor));
+  const matchedCourseNotes: string[] = [];
+  const relatedCourseCodes = new Set<string>();
+
+  let directScore = 0;
+  for (const record of professorRecords) {
+    const code = normalizeCourseCode(professorCourseCode(record));
+    const taken = transcriptByCode.get(code);
+    if (!taken) continue;
+
+    const gradeBoost = gradeMultiplier(taken.grade);
+    const unitBoost = Math.min(courseUnits(taken) / 4, 1.25);
+    directScore += 14 * (professorCourseScore(record) / 100) * gradeBoost * unitBoost;
+    relatedCourseCodes.add(normalizeCourseCode(taken.courseCode));
+    matchedCourseNotes.push(`${normalizeCourseCode(taken.courseCode)} ${cleanDisplay(taken.title)} (${cleanDisplay(taken.grade) || "grade not listed"})`);
+  }
+  directScore = Math.min(directScore, 35);
+
+  let departmentScore = 0;
+  const departmentMatches: TranscriptCourse[] = [];
+  for (const course of usableCourses) {
+    if (!subjects.has(courseSubject(course.courseCode))) continue;
+    departmentMatches.push(course);
+    departmentScore += Math.min(courseUnits(course), 5) * 1.1 * gradeMultiplier(course.grade);
+    relatedCourseCodes.add(normalizeCourseCode(course.courseCode));
+  }
+  departmentScore = Math.min(departmentScore, 25);
+
+  let topicScore = 0;
+  const topicMatches: string[] = [];
+  for (const course of usableCourses) {
+    const courseTerms = keywordTokens([course.courseCode, course.title]);
+    const overlap = [...courseTerms].filter((token) => professorTerms.has(token));
+    if (overlap.length === 0) continue;
+
+    const relevance = Math.min(overlap.length / 3, 1);
+    topicScore += 6 * relevance * gradeMultiplier(course.grade) * Math.min(courseUnits(course) / 4, 1.25);
+    relatedCourseCodes.add(normalizeCourseCode(course.courseCode));
+    if (topicMatches.length < 4) {
+      topicMatches.push(`${normalizeCourseCode(course.courseCode)} (${overlap.slice(0, 3).join(", ")})`);
+    }
+  }
+  topicScore = Math.min(topicScore, 25);
+
+  const relatedCourses = usableCourses.filter((course) => relatedCourseCodes.has(normalizeCourseCode(course.courseCode)));
+  const gradeWeights = relatedCourses.map((course) => ({
+    points: gradePoints(course.grade),
+    units: courseUnits(course),
+  })).filter((item): item is { points: number; units: number } => item.points !== null && item.points > 0);
+  const weightedUnits = gradeWeights.reduce((sum, item) => sum + item.units, 0);
+  const averagePoints = weightedUnits > 0
+    ? gradeWeights.reduce((sum, item) => sum + item.points * item.units, 0) / weightedUnits
+    : null;
+  const gradeScore = averagePoints === null ? 0 : Math.max(0, Math.min((averagePoints - 2.3) / 1.7, 1)) * 15;
+  const rawScore = directScore + departmentScore + topicScore + gradeScore;
+  const score = Math.max(0, Math.min(100, Math.round(rawScore)));
+
+  const details = [
+    departmentScore > 0
+      ? `Department area: ${departmentMatches.length} ${[...subjects].join("/")} course${departmentMatches.length === 1 ? "" : "s"} contributed ${Math.round(departmentScore)} pts.`
+      : "Department area: no transcript courses found in this professor's department subjects.",
+    directScore > 0
+      ? `Direct course match: ${matchedCourseNotes.slice(0, 3).join("; ")} contributed ${Math.round(directScore)} pts.`
+      : "Direct course match: no exact match with this professor's course-topic map.",
+    topicScore > 0
+      ? `Research/topic overlap: ${topicMatches.join("; ")} contributed ${Math.round(topicScore)} pts.`
+      : "Research/topic overlap: no strong keyword overlap found from course titles.",
+    averagePoints !== null
+      ? `Grade strength: related coursework averages ${gradeLabel(averagePoints)}, adding ${Math.round(gradeScore)} pts.`
+      : "Grade strength: no graded related coursework available yet.",
+  ];
+
+  return {
+    score,
+    summary: `${score}% match from ${relatedCourses.length} related transcript course${relatedCourses.length === 1 ? "" : "s"}.`,
+    details,
+  };
 }
 
 function easeOutCubic(progress: number): number {
@@ -134,12 +417,45 @@ I have attached my resume for your review. I would be grateful for the opportuni
 Thank you for your time and consideration.
 
 Sincerely,
-[Your Name]
-[Your Email]
-[Your Phone]`;
+[Your Name]`;
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      resolve(result.split(",")[1] ?? result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function copyTextToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+
+  if (!copied) {
+    throw new Error("Clipboard unavailable.");
+  }
+}
 
 function professorInitials(name: string): string {
   const cleaned = name
@@ -184,6 +500,42 @@ function InfoIcon() {
   );
 }
 
+function CopyIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function FieldCopyButton({
+  label,
+  copied,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  copied: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={copied ? "Copied" : label}
+      aria-label={label}
+      onClick={onClick}
+      disabled={disabled}
+      className={`absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 transition-all hover:bg-[#EBF0F6] hover:text-[#1B3968] hover:opacity-100 disabled:pointer-events-none disabled:opacity-10 ${
+        copied ? "text-[#6A9879] opacity-100" : "text-[#1B3968]/35 opacity-35"
+      }`}
+    >
+      <CopyIcon />
+    </button>
+  );
+}
+
 function XIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -192,17 +544,45 @@ function XIcon() {
   );
 }
 
-function CompatibilityBadge() {
+function CompatibilityBadge({
+  result,
+  loading,
+  error,
+}: {
+  result?: CompatibilityResult;
+  loading: boolean;
+  error?: string | null;
+}) {
+  const score = result?.score ?? null;
+  const color = compatibilityColor(score);
+  const label = loading ? "..." : score === null ? "?" : `${score}%`;
+  const summary = loading
+    ? "Loading your transcript courses from your account."
+    : error
+      ? error
+    : result?.summary ?? "Sign in and upload a transcript to calculate compatibility.";
+  const details = result?.details ?? [];
+
   return (
     <div className="relative group shrink-0" onClick={(e) => e.stopPropagation()}>
       <div
-        className="h-12 w-12 rounded-full border border-[#B3C1BB]/60 bg-[#F8F8F6] shadow-sm flex items-center justify-center"
-        aria-label="Compatibility unavailable until transcript is loaded"
+        className="h-12 w-12 rounded-full p-[3px] shadow-sm flex items-center justify-center"
+        style={{ background: score === null ? "#F8F8F6" : `conic-gradient(${color} ${score * 3.6}deg, #E1E8E4 0deg)` }}
+        aria-label={score === null ? "Compatibility unavailable until transcript is loaded" : `Compatibility ${score}%`}
       >
-        <span className="text-[18px] font-semibold text-[#94AAA1]">?</span>
+        <div className="h-full w-full rounded-full bg-[#F8F8F6] flex items-center justify-center">
+          <span className="text-[12px] font-semibold" style={{ color }}>{label}</span>
+        </div>
       </div>
-      <div className="pointer-events-none absolute right-0 top-14 z-20 w-64 rounded-xl border border-[#B3C1BB]/40 bg-white px-3 py-2 text-[11px] leading-relaxed text-[#5a6872] shadow-lg opacity-0 transition-opacity group-hover:opacity-100">
-        {compatibilitySummary()}
+      <div className="pointer-events-none absolute right-0 top-14 z-20 w-80 rounded-xl border border-[#B3C1BB]/40 bg-white px-3 py-2 text-[11px] leading-relaxed text-[#5a6872] shadow-lg opacity-0 transition-opacity group-hover:opacity-100">
+        <p className="font-semibold text-[#1a1a1a]">{summary}</p>
+        {details.length > 0 && (
+          <ul className="mt-1.5 list-disc pl-4">
+            {details.map((detail) => (
+              <li key={detail}>{detail}</li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );
@@ -397,13 +777,19 @@ export default function ProfessorSearchPage() {
   const [deptFilter,  setDeptFilter]  = useState<Set<string>>(new Set());
   const [intFilter,   setIntFilter]   = useState<Set<string>>(new Set());
   const [professors,  setProfessors]  = useState<Professor[]>([]);
+  const [transcriptCourses, setTranscriptCourses] = useState<TranscriptCourse[]>([]);
+  const [transcriptLoading, setTranscriptLoading] = useState(true);
   const [loading,     setLoading]     = useState(true);
   const [loadError,   setLoadError]   = useState<string | null>(null);
+  const [transcriptError, setTranscriptError] = useState<string | null>(null);
   const [drafted,     setDrafted]     = useState<Professor | null>(null);
   const [viewedProf,  setViewedProf]  = useState<Professor | null>(null);
   const [emailBody,   setEmailBody]   = useState("");
   const [subject,     setSubject]     = useState("");
   const [resumeFile,  setResumeFile]  = useState<File | null>(null);
+  const [aiDrafting,  setAiDrafting]  = useState(false);
+  const [draftError,  setDraftError]  = useState("");
+  const [copyStatus,  setCopyStatus]  = useState<CopyTarget>("idle");
   const [sortBy,      setSortBy]      = useState<SortOption>("compatibility");
   const [senderEmail, setSenderEmail] = useState("");
   const resultsRef = useRef<HTMLDivElement>(null);
@@ -429,6 +815,14 @@ export default function ProfessorSearchPage() {
     [professors]
   );
 
+  const compatibilityByProfessor = useMemo(() => {
+    const scores = new Map<string, CompatibilityResult>();
+    for (const professor of professors) {
+      scores.set(professorKey(professor), calculateCompatibility(professor, transcriptCourses));
+    }
+    return scores;
+  }, [professors, transcriptCourses]);
+
   const filtered = useMemo(() => {
     const matches = professors.filter((p) => {
       const interests = (p.interests ?? []).map(cleanDisplay).filter(Boolean);
@@ -445,9 +839,20 @@ export default function ProfessorSearchPage() {
       if (sortBy === "name-desc") {
         return b.name.localeCompare(a.name);
       }
+      const aScore = compatibilityByProfessor.get(professorKey(a))?.score;
+      const bScore = compatibilityByProfessor.get(professorKey(b))?.score;
+      if (aScore !== null && aScore !== undefined && bScore !== null && bScore !== undefined && bScore !== aScore) {
+        return bScore - aScore;
+      }
+      if (aScore !== null && aScore !== undefined) {
+        return -1;
+      }
+      if (bScore !== null && bScore !== undefined) {
+        return 1;
+      }
       return a.name.localeCompare(b.name);
     });
-  }, [professors, query, deptFilter, intFilter, sortBy]);
+  }, [professors, query, deptFilter, intFilter, sortBy, compatibilityByProfessor]);
 
   useEffect(() => {
     let alive = true;
@@ -482,6 +887,54 @@ export default function ProfessorSearchPage() {
     }
 
     loadProfessors();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadTranscriptCourses() {
+      setTranscriptLoading(true);
+      setTranscriptError(null);
+
+      try {
+        const response = await fetch(`${API_URL}/api/transcript/me`, {
+          credentials: "include",
+          headers: authHeaders(),
+        });
+        const payload = await response.json().catch(() => ({}));
+
+        if (response.status === 401) {
+          if (alive) {
+            setTranscriptCourses([]);
+            setTranscriptError("Sign in to calculate compatibility from your transcript.");
+          }
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(payload.message ?? payload.error ?? "Could not load transcript courses.");
+        }
+
+        if (alive) {
+          setTranscriptCourses(Array.isArray(payload.courses) ? payload.courses : []);
+        }
+      } catch (error) {
+        if (alive) {
+          setTranscriptCourses([]);
+          setTranscriptError(error instanceof Error ? error.message : "Could not load transcript courses.");
+        }
+      } finally {
+        if (alive) {
+          setTranscriptLoading(false);
+        }
+      }
+    }
+
+    loadTranscriptCourses();
 
     return () => {
       alive = false;
@@ -530,6 +983,8 @@ export default function ProfessorSearchPage() {
 
   function handleDraft(prof: Professor) {
     setDrafted(prof);
+    setDraftError("");
+    setCopyStatus("idle");
     setSubject(`Research Opportunity Inquiry — ${prof.name}'s Lab`);
     setEmailBody(emailTemplate(prof));
   }
@@ -538,9 +993,84 @@ export default function ProfessorSearchPage() {
     setDrafted(null);
     setSubject("");
     setEmailBody("");
+    setDraftError("");
+    setCopyStatus("idle");
     setResumeFile(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
+    }
+  }
+
+  async function handleCopyValue(value: string, target: Exclude<CopyTarget, "idle">, emptyMessage: string) {
+    const text = value.trim();
+
+    if (!text) {
+      setDraftError(emptyMessage);
+      return;
+    }
+
+    try {
+      await copyTextToClipboard(text);
+      setDraftError("");
+      setCopyStatus(target);
+      window.setTimeout(() => setCopyStatus("idle"), 1800);
+    } catch {
+      setDraftError("Could not copy the text. Please copy it manually.");
+    }
+  }
+
+  async function handleAiDraft() {
+    if (!drafted) {
+      setDraftError("Select a professor first.");
+      return;
+    }
+    if (!resumeFile) {
+      setDraftError("Attach your resume PDF before using AI draft.");
+      return;
+    }
+    if (resumeFile.type !== "application/pdf" && !resumeFile.name.toLowerCase().endsWith(".pdf")) {
+      setDraftError("Resume must be a PDF file.");
+      return;
+    }
+    if (resumeFile.size > 6 * 1024 * 1024) {
+      setDraftError("Resume PDF is too large. Please upload a PDF under 6 MB.");
+      return;
+    }
+
+    setAiDrafting(true);
+    setDraftError("");
+    setCopyStatus("idle");
+
+    try {
+      const dataBase64 = await fileToBase64(resumeFile);
+      const response = await fetch(`${API_URL}/professors/draft-email`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          professor: drafted,
+          senderEmail,
+          resume: {
+            fileName: resumeFile.name,
+            mimeType: "application/pdf",
+            dataBase64,
+          },
+        }),
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Could not draft email.");
+      }
+
+      setSubject(payload.subject ?? "");
+      setEmailBody(payload.body ?? "");
+    } catch (error) {
+      setDraftError(error instanceof Error ? error.message : "Could not draft email.");
+    } finally {
+      setAiDrafting(false);
     }
   }
 
@@ -584,7 +1114,7 @@ export default function ProfessorSearchPage() {
         </div>
 
         {/* ── Three-column grid ── */}
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[420px_minmax(0,1fr)_320px] xl:grid-cols-[460px_minmax(0,1fr)_340px] gap-5 items-start">
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[420px_minmax(0,1fr)_360px] xl:grid-cols-[460px_minmax(0,1fr)_440px] 2xl:grid-cols-[460px_minmax(0,1fr)_500px] gap-5 items-start">
 
           {/* ── Left: filters ── */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -625,7 +1155,7 @@ export default function ProfessorSearchPage() {
                 <div className="relative group text-[#94AAA1]">
                   <InfoIcon />
                   <div className="pointer-events-none absolute right-0 top-6 z-20 w-64 rounded-xl border border-[#B3C1BB]/40 bg-white px-3 py-2 text-[11px] leading-relaxed text-[#5a6872] shadow-lg opacity-0 transition-opacity group-hover:opacity-100">
-                    Compatibility will show after transcript/course history is available. Professor/course match evidence is loaded separately.
+                    Compatibility uses your saved transcript courses, grades, professor department subjects, and professor research/course-match keywords. Higher scores mean stronger course relevance and stronger grades in that area.
                   </div>
                 </div>
               </div>
@@ -648,6 +1178,7 @@ export default function ProfessorSearchPage() {
                 filtered.map((prof) => {
                   const details = joinDisplay([prof.title, prof.dept]);
                   const interests = (prof.interests ?? []).map(cleanDisplay).filter(Boolean);
+                  const compatibility = compatibilityByProfessor.get(professorKey(prof));
 
                   return (
                   <div
@@ -661,7 +1192,11 @@ export default function ProfessorSearchPage() {
                         {details && <p className="text-[12px] text-[#5a6872]">{details}</p>}
                       </div>
                       <div className="flex items-start gap-2 shrink-0">
-                        <CompatibilityBadge />
+                        <CompatibilityBadge
+                          result={compatibility}
+                          loading={transcriptLoading}
+                          error={transcriptError}
+                        />
                       </div>
                     </div>
                     {interests.length > 0 && (
@@ -718,13 +1253,21 @@ export default function ProfessorSearchPage() {
               {/* To */}
               <div className="flex flex-col gap-1">
                 <label className="text-[11px] font-semibold text-[#94AAA1] uppercase tracking-wide">To</label>
-                <input
-                  type="email"
-                  value={drafted?.email ?? ""}
-                  readOnly
-                  placeholder="Select a professor to auto-fill"
-                  className="text-[13px] px-3 py-2 rounded-lg border border-[#B3C1BB]/40 bg-[#F8F8F6] text-[#1a1a1a] placeholder:text-[#B3C1BB] focus:outline-none"
-                />
+                <div className="relative">
+                  <input
+                    type="email"
+                    value={drafted?.email ?? ""}
+                    readOnly
+                    placeholder="Select a professor to auto-fill"
+                    className="w-full text-[13px] pl-3 pr-10 py-2 rounded-lg border border-[#B3C1BB]/40 bg-[#F8F8F6] text-[#1a1a1a] placeholder:text-[#B3C1BB] focus:outline-none"
+                  />
+                  <FieldCopyButton
+                    label="Copy professor email"
+                    copied={copyStatus === "email"}
+                    disabled={!drafted?.email}
+                    onClick={() => handleCopyValue(drafted?.email ?? "", "email", "There is no professor email to copy yet.")}
+                  />
+                </div>
               </div>
 
               {/* From */}
@@ -733,7 +1276,10 @@ export default function ProfessorSearchPage() {
                 <input
                   type="email"
                   value={senderEmail}
-                  onChange={(e) => setSenderEmail(e.target.value)}
+                  onChange={(e) => {
+                    setSenderEmail(e.target.value);
+                    setCopyStatus("idle");
+                  }}
                   placeholder="username@ucdavis.edu"
                   className="text-[13px] px-3 py-2 rounded-lg border border-[#B3C1BB]/40 bg-[#F8F8F6] text-[#1a1a1a] placeholder:text-[#B3C1BB] focus:outline-none focus:border-[#1B3968] focus:ring-1 focus:ring-[#1B3968]/10"
                 />
@@ -742,13 +1288,24 @@ export default function ProfessorSearchPage() {
               {/* Subject */}
               <div className="flex flex-col gap-1">
                 <label className="text-[11px] font-semibold text-[#94AAA1] uppercase tracking-wide">Subject</label>
+                <div className="relative">
                 <input
                   type="text"
                   value={subject}
-                  onChange={(e) => setSubject(e.target.value)}
+                  onChange={(e) => {
+                    setSubject(e.target.value);
+                    setCopyStatus("idle");
+                  }}
                   placeholder="Email subject…"
-                  className="text-[13px] px-3 py-2 rounded-lg border border-[#B3C1BB]/40 bg-[#F8F8F6] text-[#1a1a1a] placeholder:text-[#B3C1BB] focus:outline-none focus:border-[#1B3968] focus:ring-1 focus:ring-[#1B3968]/10"
+                  className="w-full text-[13px] pl-3 pr-10 py-2 rounded-lg border border-[#B3C1BB]/40 bg-[#F8F8F6] text-[#1a1a1a] placeholder:text-[#B3C1BB] focus:outline-none focus:border-[#1B3968] focus:ring-1 focus:ring-[#1B3968]/10"
                 />
+                  <FieldCopyButton
+                    label="Copy subject line"
+                    copied={copyStatus === "subject"}
+                    disabled={!subject.trim()}
+                    onClick={() => handleCopyValue(subject, "subject", "There is no subject line to copy yet.")}
+                  />
+                </div>
               </div>
 
               {/* Body */}
@@ -756,10 +1313,13 @@ export default function ProfessorSearchPage() {
                 <label className="text-[11px] font-semibold text-[#94AAA1] uppercase tracking-wide">Body</label>
                 <textarea
                   value={emailBody}
-                  onChange={(e) => setEmailBody(e.target.value)}
+                  onChange={(e) => {
+                    setEmailBody(e.target.value);
+                    setCopyStatus("idle");
+                  }}
                   placeholder="Click 'Draft email' on a professor to generate a template…"
-                  rows={10}
-                  className="text-[12px] px-3 py-2 rounded-lg border border-[#B3C1BB]/40 bg-[#F8F8F6] text-[#1a1a1a] placeholder:text-[#B3C1BB] focus:outline-none focus:border-[#1B3968] focus:ring-1 focus:ring-[#1B3968]/10 resize-none leading-relaxed flex-1"
+                  rows={16}
+                  className="min-h-[24rem] text-[12px] px-3 py-2 rounded-lg border border-[#B3C1BB]/40 bg-[#F8F8F6] text-[#1a1a1a] placeholder:text-[#B3C1BB] focus:outline-none focus:border-[#1B3968] focus:ring-1 focus:ring-[#1B3968]/10 resize-none leading-relaxed flex-1"
                 />
               </div>
 
@@ -778,17 +1338,37 @@ export default function ProfessorSearchPage() {
                     type="file"
                     accept=".pdf"
                     className="hidden"
-                    onChange={(e) => setResumeFile(e.target.files?.[0] ?? null)}
+                    onChange={(e) => {
+                      setDraftError("");
+                      setResumeFile(e.target.files?.[0] ?? null);
+                    }}
                   />
                 </label>
               </div>
 
-              {/* Send button */}
+              {draftError && (
+                <p className="rounded-lg border border-[#B35C5C]/30 bg-[#FFF5F5] px-3 py-2 text-[11px] leading-relaxed text-[#B35C5C]">
+                  {draftError}
+                </p>
+              )}
+
               <button
-                disabled={!drafted}
+                type="button"
+                onClick={handleAiDraft}
+                disabled={!drafted || !resumeFile || aiDrafting}
+                className="w-full py-2.5 rounded-xl border border-[#1B3968]/20 bg-[#EBF0F6] text-[#1B3968] text-[13px] font-semibold hover:bg-[#DDE8F4] transition-colors disabled:opacity-45 disabled:cursor-not-allowed disabled:hover:bg-[#EBF0F6]"
+              >
+                {aiDrafting ? "Drafting with Gemini..." : "AI draft with resume"}
+              </button>
+
+              {/* Copy body */}
+              <button
+                type="button"
+                onClick={() => handleCopyValue(emailBody, "body", "There is no email body to copy yet.")}
+                disabled={!emailBody.trim()}
                 className="w-full py-2.5 rounded-xl bg-[#1B3968] text-white text-[13px] font-medium hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Send email
+                {copyStatus === "body" ? "Copied body" : "Copy body"}
               </button>
             </div>
           </div>
