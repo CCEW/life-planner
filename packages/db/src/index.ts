@@ -3,8 +3,8 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { config as loadEnv } from "dotenv";
 import path from "path";
 
-loadEnv();
-loadEnv({ path: path.resolve(__dirname, "../../../.env") });
+loadEnv({ override: true });
+loadEnv({ path: path.resolve(__dirname, "../../../.env"), override: true });
 
 const connectionString = process.env.DATABASE_URL;
 

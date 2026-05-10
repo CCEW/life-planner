@@ -1,18 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 
 // ─── Icon components (inline SVG, no extra dependency) ────────────────────────
-
-function BookIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6A9879" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-    </svg>
-  );
-}
 
 function SchoolIcon() {
   return (
@@ -123,9 +116,66 @@ function Feature({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+
 export default function SignUpPage() {
+  const router = useRouter();
+
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [major, setMajor] = useState("");
+  const [graduationYear, setGraduationYear] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [agreed, setAgreed] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [needsConfirmation, setNeedsConfirmation] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    if (password !== confirm) {
+      setError("Passwords do not match.");
+      return;
+    }
+    if (!agreed) {
+      setError("Please agree to the Terms of Service and Privacy Policy.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/auth/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ fullName, email, password, major, graduationYear }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error ?? "Something went wrong. Please try again.");
+        return;
+      }
+
+      if (data.needsEmailConfirmation) {
+        setNeedsConfirmation(true);
+        return;
+      }
+
+      router.push("/dashboard");
+    } catch {
+      setError("Could not reach the server. Make sure the API is running.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-[#F4F2E8] p-4 sm:p-8">
@@ -136,127 +186,164 @@ export default function SignUpPage() {
 
           {/* Logo */}
           <div className="flex items-center gap-2 mb-7">
-            <div className="w-7 h-7 rounded-md bg-[#1B3968] flex items-center justify-center">
-              <BookIcon />
-            </div>
-            <span className="text-sm font-medium text-[#1a1a1a]">Student Life Helper</span>
+            <Image src="/logo2.png" alt="Student Life Helper" width={150} height={150} className="object-contain" />
+            <span className="text-[40px] font-medium text-[#1a1a1a]">Student Life Helper</span>
           </div>
 
           <h1 className="text-[22px] font-medium text-[#1a1a1a] mb-1">Create your account</h1>
           <p className="text-[13px] text-[#5a6872] mb-6">Join thousands of Aggies studying smarter</p>
 
-          {/* Full name */}
-          <Field label="Full name">
-            <input type="text" placeholder="e.g. Alex Rivera" className={inputClass} />
-          </Field>
-
-          {/* Email */}
-          <Field label="UC Davis email">
-            <input type="email" placeholder="username@ucdavis.edu" className={inputClass} />
-          </Field>
-
-          {/* Major + Graduation year */}
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Major">
-              <select className={inputClass}>
-                <option value="">Select major</option>
-                <option>Computer Science</option>
-                <option>Biology</option>
-                <option>Psychology</option>
-                <option>Economics</option>
-                <option>Chemistry</option>
-                <option>Mathematics</option>
-              </select>
+          <form onSubmit={handleSubmit}>
+            {/* Full name */}
+            <Field label="Full name">
+              <input
+                type="text"
+                placeholder="e.g. Alex Rivera"
+                className={inputClass}
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                required
+              />
             </Field>
-            <Field label="Graduation year">
-              <select className={inputClass}>
-                <option value="">Year</option>
-                <option>2026</option>
-                <option>2027</option>
-                <option>2028</option>
-                <option>2029</option>
-              </select>
-            </Field>
-          </div>
 
-          {/* Password + Confirm */}
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Password">
-              <div className="relative">
-                <input
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Min. 8 characters"
-                  className={`${inputClass} pr-9`}
-                />
-                <button
-                  type="button"
-                  aria-label="Toggle password visibility"
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94AAA1] hover:text-[#1B3968] transition-colors"
+            {/* Email */}
+            <Field label="UC Davis email">
+              <input
+                type="email"
+                placeholder="username@ucdavis.edu"
+                className={inputClass}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </Field>
+
+            {/* Major + Graduation year */}
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Major">
+                <select
+                  className={inputClass}
+                  value={major}
+                  onChange={(e) => setMajor(e.target.value)}
                 >
-                  {showPassword ? <EyeOffIcon /> : <EyeIcon />}
-                </button>
-              </div>
-            </Field>
-            <Field label="Confirm password">
-              <div className="relative">
-                <input
-                  type={showConfirm ? "text" : "password"}
-                  placeholder="Repeat password"
-                  className={`${inputClass} pr-9`}
-                />
-                <button
-                  type="button"
-                  aria-label="Toggle confirm password visibility"
-                  onClick={() => setShowConfirm((v) => !v)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94AAA1] hover:text-[#1B3968] transition-colors"
+                  <option value="">Select major</option>
+                  <option>Aerospace Science and Engineering</option>
+                  <option>Biochemical Engineering</option>
+                  <option>Biological Systems Engineering</option>
+                  <option>Biomedical Engineering</option>
+                  <option>Chemical Engineering</option>
+                  <option>Civil Engineering</option>
+                  <option>Computer Engineering</option>
+                  <option>Computer Science</option>
+                  <option>Computer Science and Engineering</option>
+                  <option>Electrical Engineering</option>
+                  <option>Environmental Engineering</option>
+                  <option>Materials Science and Engineering</option>
+                  <option>Mechanical Engineering</option>
+                </select>
+              </Field>
+              <Field label="Graduation year">
+                <select
+                  className={inputClass}
+                  value={graduationYear}
+                  onChange={(e) => setGraduationYear(e.target.value)}
                 >
-                  {showConfirm ? <EyeOffIcon /> : <EyeIcon />}
-                </button>
-              </div>
-            </Field>
-          </div>
+                  <option value="">Year</option>
+                  <option>2026</option>
+                  <option>2027</option>
+                  <option>2028</option>
+                  <option>2029</option>
+                </select>
+              </Field>
+            </div>
 
-          {/* Work hours (optional) */}
-          <Field
-            label={
-              <>
-                Work hours per week{" "}
-                <span className="font-normal text-[#94AAA1]">(optional)</span>
-              </>
-            }
-          >
-            <input
-              type="number"
-              placeholder="e.g. 20"
-              min={0}
-              max={60}
-              className={inputClass}
-            />
-          </Field>
+            {/* Password + Confirm */}
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Password">
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Min. 8 characters"
+                    className={`${inputClass} pr-9`}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    minLength={8}
+                  />
+                  <button
+                    type="button"
+                    aria-label="Toggle password visibility"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94AAA1] hover:text-[#1B3968] transition-colors"
+                  >
+                    {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+                  </button>
+                </div>
+              </Field>
+              <Field label="Confirm password">
+                <div className="relative">
+                  <input
+                    type={showConfirm ? "text" : "password"}
+                    placeholder="Repeat password"
+                    className={`${inputClass} pr-9`}
+                    value={confirm}
+                    onChange={(e) => setConfirm(e.target.value)}
+                    required
+                  />
+                  <button
+                    type="button"
+                    aria-label="Toggle confirm password visibility"
+                    onClick={() => setShowConfirm((v) => !v)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94AAA1] hover:text-[#1B3968] transition-colors"
+                  >
+                    {showConfirm ? <EyeOffIcon /> : <EyeIcon />}
+                  </button>
+                </div>
+              </Field>
+            </div>
 
-          {/* Terms */}
-          <div className="flex items-start gap-2 mb-5">
-            <input
-              type="checkbox"
-              id="terms"
-              className="mt-0.5 shrink-0 accent-[#1B3968]"
-            />
-            <label htmlFor="terms" className="text-[12px] text-[#5a6872] leading-relaxed">
-              I agree to the{" "}
-              <Link href="#" className="text-[#1B3968] font-medium hover:underline">
-                Terms of Service
-              </Link>{" "}
-              and{" "}
-              <Link href="#" className="text-[#1B3968] font-medium hover:underline">
-                Privacy Policy
-              </Link>
-            </label>
-          </div>
+            {/* Terms */}
+            <div className="flex items-start gap-2 mb-5">
+              <input
+                type="checkbox"
+                id="terms"
+                className="mt-0.5 shrink-0 accent-[#1B3968]"
+                checked={agreed}
+                onChange={(e) => setAgreed(e.target.checked)}
+              />
+              <label htmlFor="terms" className="text-[12px] text-[#5a6872] leading-relaxed">
+                I agree to the{" "}
+                <Link href="#" className="text-[#1B3968] font-medium hover:underline">
+                  Terms of Service
+                </Link>{" "}
+                and{" "}
+                <Link href="#" className="text-[#1B3968] font-medium hover:underline">
+                  Privacy Policy
+                </Link>
+              </label>
+            </div>
 
-          <button className="w-full py-2.5 rounded-lg bg-[#1B3968] text-white text-sm font-medium hover:opacity-90 transition-opacity mb-4">
-            Create account
-          </button>
+            {/* Status messages */}
+            {error && (
+              <p className="text-[12px] text-red-600 mb-4 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {error}
+              </p>
+            )}
+            {needsConfirmation && (
+              <p className="text-[12px] text-[#1B3968] mb-4 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                Account created! Check your <strong>{email}</strong> inbox to confirm your email, then{" "}
+                <a href="/signin" className="underline font-medium">sign in</a>.
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-2.5 rounded-lg bg-[#1B3968] text-white text-sm font-medium hover:opacity-90 transition-opacity mb-4 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {loading ? "Creating account…" : "Create account"}
+            </button>
+          </form>
 
           <p className="text-center text-[13px] text-[#5a6872]">
             Already have an account?{" "}
