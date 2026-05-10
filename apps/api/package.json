@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "ts-node-dev --respawn src/index.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "seed:professors": "ts-node scripts/loadEngineeringProfessors.ts"
   },
   "dependencies": {
     "@life-planner/db": "*",
