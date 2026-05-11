@@ -178,6 +178,7 @@ export default function SignUpPage() {
       if (data.token) {
         clearUserScopedStorage();
         localStorage.setItem("token", data.token);
+        document.cookie = `token=${data.token}; path=/; max-age=604800; SameSite=Lax`;
       }
 
       router.push("/dashboard");

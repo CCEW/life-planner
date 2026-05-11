@@ -10,6 +10,7 @@ function clearUserScopedStorage() {
   for (const key of Object.keys(localStorage)) {
     if (key.startsWith("life-planner:")) localStorage.removeItem(key);
   }
+  document.cookie = "token=; path=/; max-age=0; SameSite=Lax";
 }
 
 export default function AccountMenu({ fullName }: { fullName: string }) {
