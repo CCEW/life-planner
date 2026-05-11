@@ -6,7 +6,15 @@
   "scripts": {
     "dev:api": "npm run dev --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web",
-    "dev": "npm run dev:api & npm run dev:web"
+    "dev": "npm run dev:api & npm run dev:web",
+    "db:check:supabase": "ts-node infra/scripts/load-courses-supabase.ts --check",
+    "db:check:majors": "ts-node infra/scripts/seed-majors.ts --check",
+    "db:check:offered:fall26": "ts-node infra/scripts/seed-courses-offered-by-term.ts --check",
+    "db:check:professors": "ts-node infra/scripts/seed-engineering-professors.ts --check",
+    "seed:courses:supabase": "ts-node infra/scripts/load-courses-supabase.ts",
+    "seed:majors": "ts-node infra/scripts/seed-majors.ts",
+    "seed:professors": "ts-node infra/scripts/seed-engineering-professors.ts",
+    "seed:offered:fall26": "ts-node infra/scripts/seed-courses-offered-by-term.ts"
   },
   "repository": {
     "type": "git",

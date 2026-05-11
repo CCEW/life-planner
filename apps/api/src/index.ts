@@ -5,6 +5,11 @@ import dotenv from "dotenv";
 import path from "path";
 import googleCalendarRouter from "./routes/googleCalendar";
 import authRouter from "./routes/auth";
+import aiRouter from "./routes/ai";
+import coursesRouter from "./routes/courses";
+import degreeAuditRouter from "./routes/degreeAudit";
+import recommendationsRouter from "./routes/recommendations";
+import userCoursesRouter from "./routes/userCourses";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
@@ -23,6 +28,13 @@ app.use(authRouter);
 
 // ── Google Calendar OAuth + events ───────────────────────────────────────────
 app.use(googleCalendarRouter);
+
+app.use("/ai", aiRouter);
+app.use("/courses", coursesRouter);
+app.use("/api/courses", coursesRouter);
+app.use("/degree-audit", degreeAuditRouter);
+app.use("/recommendations", recommendationsRouter);
+app.use("/user-courses", userCoursesRouter);
 
 // ── Health check ─────────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => {

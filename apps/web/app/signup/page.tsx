@@ -169,6 +169,10 @@ export default function SignUpPage() {
         return;
       }
 
+      if (data.token) {
+        localStorage.setItem("token", data.token);
+      }
+
       router.push("/dashboard");
     } catch {
       setError("Could not reach the server. Make sure the API is running.");
