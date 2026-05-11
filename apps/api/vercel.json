@@ -1,11 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build",
-  "installCommand": "npm install",
+  "installCommand": "cd ../.. && npm install",
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "/src/index.ts"
+      "destination": "/dist/index.js"
     }
   ],
   "relatedProjects": ["prj_O6r2dlXJgs1MlxrrAtDC5A61B045"]
