@@ -6,6 +6,7 @@ jspm_packages/
 dist/
 build/
 out/
+packages/*/dist/
 .next/
 .nuxt/
 .output/

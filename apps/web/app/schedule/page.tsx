@@ -9,7 +9,7 @@ import { chatWithAI } from "../../lib/api";
 import { withRelatedProject } from '@vercel/related-projects';
 
 const API = withRelatedProject({
-  projectName: 'life-planner-api',  // the name of your API project in Vercel
+  projectName: 'life-planner-api',  // the name of the API project in Vercel
   defaultHost: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000',
 });
 

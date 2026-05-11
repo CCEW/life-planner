@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "build:packages": "npm run build -w packages/db -w packages/schemas -w packages/types",
     "dev:api": "npm run dev --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web",
     "dev": "npm run dev:api & npm run dev:web",

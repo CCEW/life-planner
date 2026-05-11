@@ -5,7 +5,7 @@ export default defineConfig({
   format: ["cjs"],
   platform: "node",
   bundle: true,
-  noExternal: [/@life-planner\/.*/],
+  noExternal: ["@life-planner/db", "@life-planner/schemas", "@life-planner/types"],
   outDir: "dist",
   splitting: false,
   clean: true,
