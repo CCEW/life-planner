@@ -6,7 +6,13 @@ import Link from "next/link";
 import Image from "next/image";
 import { chatWithAI } from "../../lib/api";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+import { withRelatedProject } from '@vercel/related-projects';
+
+const API = withRelatedProject({
+  projectName: 'life-planner-api',  // the name of your API project in Vercel
+  defaultHost: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000',
+});
+
 const TRANSCRIPT_COURSES_STORAGE_KEY = "life-planner:transcript-courses";
 
 // ─── Types ────────────────────────────────────────────────────────────────────

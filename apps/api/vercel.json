@@ -7,5 +7,6 @@
       "source": "/(.*)",
       "destination": "/src/index.ts"
     }
-  ]
+  ],
+  "relatedProjects": ["prj_O6r2dlXJgs1MlxrrAtDC5A61B045"]
 }
