@@ -1,6 +1,5 @@
 import { Router, Request, Response } from "express";
 import { createClient } from "@supabase/supabase-js";
-import { prisma } from "@life-planner/db";
 
 const router = Router();
 
@@ -9,6 +8,63 @@ function getSupabase() {
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_ANON_KEY!
   );
+}
+
+function getSupabaseAdmin() {
+  return createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  );
+}
+
+function clearUserScopedCookies(res: Response) {
+  res.clearCookie("token");
+  res.clearCookie("g_access");
+  res.clearCookie("g_refresh");
+}
+
+async function upsertUserProfile(user: {
+  id: string;
+  email?: string | null;
+  user_metadata?: Record<string, unknown>;
+}, fallback?: {
+  fullName?: string;
+  major?: string | null;
+  graduationYear?: string | number | null;
+}) {
+  const email = user.email ?? "";
+  const metadata = user.user_metadata ?? {};
+  const fullName =
+    fallback?.fullName ??
+    (metadata.full_name as string | undefined) ??
+    (email ? email.split("@")[0] : "Student");
+  const major =
+    fallback?.major ??
+    (metadata.major as string | undefined) ??
+    null;
+  const graduationYearValue =
+    fallback?.graduationYear ??
+    (metadata.graduation_year as string | number | undefined) ??
+    null;
+  const now = new Date().toISOString();
+
+  const { error } = await getSupabaseAdmin()
+    .from("User")
+    .upsert(
+      {
+        id: user.id,
+        email,
+        fullName,
+        passwordHash: null,
+        major,
+        graduationYear: graduationYearValue ? Number(graduationYearValue) : null,
+        updatedAt: now,
+      },
+      { onConflict: "id" }
+    );
+
+  if (error) throw error;
 }
 
 // POST /auth/signup
@@ -55,26 +111,11 @@ router.post("/auth/signup", async (req: Request, res: Response) => {
     }
 
     if (data.user) {
-      await prisma.user.upsert({
-        where: { id: data.user.id },
-        create: {
-          id: data.user.id,
-          email: email,
-          fullName: fullName,
-          passwordHash: "",
-          major: major || null,
-          graduationYear: graduationYear ? Number(graduationYear) : null,
-        },
-        update: {
-          email: email,
-          fullName: fullName,
-          major: major || null,
-          graduationYear: graduationYear ? Number(graduationYear) : null,
-        },
-      }).catch((e) => console.warn("[signup] prisma upsert skipped:", e?.message));
+      await upsertUserProfile(data.user, { fullName, major: major || null, graduationYear });
     }
 
     if (data.session) {
+      clearUserScopedCookies(res);
       res.cookie("token", data.session.access_token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
@@ -111,19 +152,9 @@ router.post("/auth/signin", async (req: Request, res: Response) => {
       return;
     }
 
-    await prisma.user.upsert({
-      where: { id: data.user.id },
-      create: {
-        id: data.user.id,
-        email: data.user.email!,
-        fullName: (data.user.user_metadata?.full_name as string | undefined) ?? data.user.email!.split("@")[0],
-        passwordHash: "",
-        major: (data.user.user_metadata?.major as string | undefined) ?? null,
-        graduationYear: data.user.user_metadata?.graduation_year ? Number(data.user.user_metadata.graduation_year) : null,
-      },
-      update: {},
-    }).catch((e) => console.warn("[signin] prisma upsert skipped:", e?.message));
+    await upsertUserProfile(data.user);
 
+    clearUserScopedCookies(res);
     res.cookie("token", data.session.access_token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -136,6 +167,12 @@ router.post("/auth/signin", async (req: Request, res: Response) => {
     console.error("[signin error]", err);
     res.status(500).json({ error: "Sign in failed. Check the API logs." });
   }
+});
+
+// POST /auth/signout
+router.post("/auth/signout", (_req: Request, res: Response) => {
+  clearUserScopedCookies(res);
+  res.json({ ok: true });
 });
 
 export default router;

@@ -1,22 +1,30 @@
 "use client";
 
-import { useState, Fragment } from "react";
+import { useEffect, useState, Fragment } from "react";
 import Link from "next/link";
 import Image from "next/image";
 
-// ─── Static placeholder data (replace with real API data later) ───────────────
+const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-const MY_COURSES = [
-  { code: "ECS 20", name: "Discrete Math" },
-  { code: "MAT 21A", name: "Calculus" },
-  { code: "ECS 36A", name: "Programming & Problem Solving" },
-];
+type TranscriptCourse = {
+  courseCode: string;
+  title: string;
+  units: number | null;
+  grade: string | null;
+  quarter: string | null;
+};
 
-const SAMPLE_MATCHES = [
-  { name: "Jordan Lee",  course: "ECS 20 — Discrete Math",           overlap: "Mon 10am–12pm" },
-  { name: "Sam Patel",   course: "MAT 21A — Calculus",               overlap: "Wed 2pm–4pm"   },
-  { name: "Riley Chen",  course: "ECS 36A — Programming",            overlap: "Fri 11am–1pm"  },
-];
+type StudyMatch = {
+  userId: string;
+  name: string;
+  email: string;
+  commonCourses: Array<{ courseCode: string; title: string }>;
+  commonFreeTimes: string[];
+};
+
+type SavedTranscriptResponse = {
+  courses?: TranscriptCourse[];
+};
 
 // ─── Grid config ──────────────────────────────────────────────────────────────
 
@@ -52,10 +60,45 @@ function SearchIcon() {
 
 export default function AggiematePage() {
   // Set of "Day-Hour" keys the user marked as free, e.g. "Mon-10"
+  const [currentCourses, setCurrentCourses] = useState<TranscriptCourse[]>([]);
   const [freeCells, setFreeCells] = useState<Set<string>>(new Set());
   const [isDragging, setIsDragging] = useState(false);
   const [dragMode, setDragMode]   = useState<"add" | "remove">("add");
   const [showMatches, setShowMatches] = useState(false);
+  const [matches, setMatches] = useState<StudyMatch[]>([]);
+  const [matchesLoading, setMatchesLoading] = useState(false);
+  const [matchesError, setMatchesError] = useState<string | null>(null);
+  const [matchedUserIds, setMatchedUserIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function syncCurrentCourses() {
+      try {
+        const res = await fetch(`${API}/api/transcript/me`, {
+          credentials: "include",
+        });
+        if (!res.ok) {
+          if (!cancelled) setCurrentCourses([]);
+          return;
+        }
+        const data = await res.json() as SavedTranscriptResponse;
+        const courses = Array.isArray(data.courses) ? data.courses : [];
+        if (!cancelled) {
+          setCurrentCourses(courses.filter((course) => course.grade === "IP"));
+        }
+      } catch {
+        if (!cancelled) setCurrentCourses([]);
+      }
+    }
+
+    syncCurrentCourses();
+    window.addEventListener("focus", syncCurrentCourses);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", syncCurrentCourses);
+    };
+  }, []);
 
   function cellKey(day: string, hour: number) {
     return `${day}-${hour}`;
@@ -66,7 +109,8 @@ export default function AggiematePage() {
     const m   = mode ?? (freeCells.has(key) ? "remove" : "add");
     setFreeCells((prev) => {
       const next = new Set(prev);
-      m === "add" ? next.add(key) : next.delete(key);
+      if (m === "add") next.add(key);
+      else next.delete(key);
       return next;
     });
     return m;
@@ -88,8 +132,61 @@ export default function AggiematePage() {
     setIsDragging(false);
   }
 
+  async function handleFindStudyPartners() {
+    setShowMatches(true);
+    setMatchesError(null);
+
+    if (currentCourses.length === 0) {
+      setMatches([]);
+      setMatchesError("Sync your in-progress courses from Schedule Planner first.");
+      return;
+    }
+    if (freeCells.size === 0) {
+      setMatches([]);
+      setMatchesError("Mark at least one free time block first.");
+      return;
+    }
+
+    setMatchesLoading(true);
+    try {
+      const res = await fetch(`${API}/api/aggie-mate/matches`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          courses: currentCourses,
+          freeCells: Array.from(freeCells),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to find study partners.");
+      setMatches(Array.isArray(data.matches) ? data.matches : []);
+    } catch (err) {
+      setMatches([]);
+      setMatchesError(err instanceof Error ? err.message : "Failed to find study partners.");
+    } finally {
+      setMatchesLoading(false);
+    }
+  }
+
+  async function handleMatch(userId: string) {
+    setMatchesError(null);
+    try {
+      const res = await fetch(`${API}/api/aggie-mate/match`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ receiverId: userId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not match with this student.");
+      setMatchedUserIds((current) => new Set(current).add(userId));
+    } catch (err) {
+      setMatchesError(err instanceof Error ? err.message : "Could not match with this student.");
+    }
+  }
+
   return (
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
     <div
       className="min-h-screen flex flex-col bg-[#F4F2E8] select-none"
       onMouseUp={handleMouseUp}
@@ -120,14 +217,20 @@ export default function AggiematePage() {
             </div>
 
             <div className="border-t border-[#B3C1BB]/30 px-5 py-3 flex flex-col gap-2">
-              {MY_COURSES.map((c) => (
-                <div key={c.code} className="flex items-center gap-2.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-[#6A9879] shrink-0" />
-                  <span className="text-[13px] text-[#1a1a1a]">
-                    <span className="font-medium">{c.code}</span> — {c.name}
-                  </span>
-                </div>
-              ))}
+              {currentCourses.length === 0 ? (
+                <p className="text-[12px] text-[#B3C1BB] py-2">
+                  Upload your transcript in Schedule Planner to sync in-progress courses.
+                </p>
+              ) : (
+                currentCourses.map((c) => (
+                  <div key={`${c.courseCode}-${c.quarter ?? "current"}`} className="flex items-center gap-2.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-[#6A9879] shrink-0" />
+                    <span className="text-[13px] text-[#1a1a1a]">
+                      <span className="font-medium">{c.courseCode}</span> — {c.title}
+                    </span>
+                  </div>
+                ))
+              )}
             </div>
 
             {/* Look up a friend */}
@@ -219,10 +322,11 @@ export default function AggiematePage() {
             {/* Find study partners button */}
             <div className="px-5 pb-5 mt-auto">
               <button
-                onClick={() => setShowMatches(true)}
+                onClick={handleFindStudyPartners}
+                disabled={matchesLoading}
                 className="w-full py-2.5 rounded-xl border border-[#B3C1BB]/60 bg-white text-[14px] font-medium text-[#1a1a1a] hover:bg-[#1B3968] hover:text-white hover:border-[#1B3968] transition-all duration-200"
               >
-                Find study partners
+                {matchesLoading ? "Finding partners..." : "Find study partners"}
               </button>
             </div>
           </div>
@@ -233,26 +337,63 @@ export default function AggiematePage() {
           <div className="px-5 pt-5 pb-4 flex items-center justify-between border-b border-[#B3C1BB]/30">
             <p className="text-[15px] font-semibold text-[#1a1a1a]">Matches</p>
             <span className="text-[13px] font-medium text-[#5a6872]">
-              {showMatches ? `${SAMPLE_MATCHES.length} matches found` : "—"}
+              {showMatches ? `${matches.length} match${matches.length !== 1 ? "es" : ""} found` : "—"}
             </span>
           </div>
 
           <div className="flex-1 px-5 py-4 flex flex-col gap-3">
+            {matchesError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                <p className="text-[12px] text-red-500">{matchesError}</p>
+              </div>
+            )}
             {!showMatches ? (
               <div className="flex-1 flex flex-col items-center justify-center py-16 gap-2">
                 <p className="text-[13px] text-[#B3C1BB] text-center max-w-[200px] leading-relaxed">
                   Mark your availability and click <span className="font-medium text-[#5a6872]">Find study partners</span> to see matches
                 </p>
               </div>
+            ) : matchesLoading ? (
+              <div className="flex-1 flex items-center justify-center py-16">
+                <p className="text-[13px] text-[#94AAA1] animate-pulse">Checking shared classes and free time...</p>
+              </div>
+            ) : matches.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center py-16">
+                <p className="text-[13px] text-[#B3C1BB] text-center max-w-[220px] leading-relaxed">
+                  No matching classmates yet. Try marking more free blocks or check back after classmates use Aggie Mate.
+                </p>
+              </div>
             ) : (
-              SAMPLE_MATCHES.map((match) => (
+              matches.map((match) => (
                 <div
-                  key={match.name}
+                  key={match.userId}
                   className="rounded-xl border border-[#B3C1BB]/40 bg-[#F8F8F6] px-4 py-4 flex flex-col gap-1.5"
                 >
-                  <p className="text-[14px] font-semibold text-[#1a1a1a]">{match.name}</p>
-                  <p className="text-[13px] text-[#5a6872]">{match.course}</p>
-                  <p className="text-[12px] text-[#6A9879] font-medium">{match.overlap}</p>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[14px] font-semibold text-[#1a1a1a]">{match.name}</p>
+                      <p className="text-[12px] text-[#94AAA1] truncate">{match.email}</p>
+                    </div>
+                    <button
+                      onClick={() => handleMatch(match.userId)}
+                      disabled={matchedUserIds.has(match.userId)}
+                      className={`shrink-0 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
+                        matchedUserIds.has(match.userId)
+                          ? "bg-[#6A9879]/15 text-[#487A62]"
+                          : "bg-white border border-[#B3C1BB]/60 text-[#1a1a1a] hover:bg-[#1B3968] hover:text-white hover:border-[#1B3968]"
+                      }`}
+                    >
+                      {matchedUserIds.has(match.userId) ? "Matched" : "Match"}
+                    </button>
+                  </div>
+                  <p className="text-[13px] text-[#5a6872]">
+                    <span className="font-medium">Class in common:</span>{" "}
+                    {match.commonCourses.map((course) => `${course.courseCode} — ${course.title}`).join(", ")}
+                  </p>
+                  <p className="text-[12px] text-[#6A9879] font-medium">
+                    Free together: {match.commonFreeTimes.slice(0, 4).join(", ")}
+                    {match.commonFreeTimes.length > 4 ? ` +${match.commonFreeTimes.length - 4} more` : ""}
+                  </p>
                 </div>
               ))
             )}

@@ -4,6 +4,25 @@ import { createClient } from "@supabase/supabase-js";
 
 const router = Router();
 
+type OfferedCourseRow = {
+  id: string;
+  termCode: string;
+  courseCode: string;
+  section: string | null;
+  crn: string | null;
+  title: string;
+  unitsMin: number | null;
+  unitsMax: number | null;
+  unitsText: string | null;
+  geCategories: string[] | null;
+  writingCategories: string[] | null;
+  instructors: string[] | null;
+  meetings: { time_days?: string }[] | null;
+  consentRequired: boolean | null;
+  openSeats: number | null;
+  waitlist: number | null;
+};
+
 function getSupabase() {
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
@@ -18,6 +37,13 @@ function getSupabase() {
 function resolveTerm(termCode: string | undefined) {
   if (termCode === "202610") return "fall26";
   return undefined;
+}
+
+function hasProperMeetingTimes(meetings: OfferedCourseRow["meetings"]): boolean {
+  return (meetings ?? []).some((meeting) => {
+    const timeDays = meeting.time_days?.trim() ?? "";
+    return /\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\s*(AM|PM)/i.test(timeDays);
+  });
 }
 
 // GET /courses — list with optional search and department filter
@@ -105,40 +131,83 @@ router.get("/", async (req: Request, res: Response) => {
 
 // GET /courses/offered?termCode=202610&scope=all
 router.get("/offered", async (req: Request, res: Response) => {
+  const termCode = typeof req.query.termCode === "string" ? req.query.termCode : "202610";
+  const scope = typeof req.query.scope === "string" ? req.query.scope : "ge";
+  const term = resolveTerm(termCode);
+  const supabase = getSupabase();
+  const pageSize = 1000;
+  const rows: OfferedCourseRow[] = [];
+
+  if (!supabase) {
+    res.status(500).json({ message: "Supabase is not configured" });
+    return;
+  }
+
   try {
-    const termCode = typeof req.query.termCode === "string" ? req.query.termCode : "202610";
-    const scope = typeof req.query.scope === "string" ? req.query.scope : "open";
-    const term = resolveTerm(termCode);
-    const supabase = getSupabase();
+    for (let from = 0; ; from += pageSize) {
+      const to = from + pageSize - 1;
+      let query = supabase
+        .from("CoursesOfferedByTerm")
+        .select(
+          [
+            "id",
+            "termCode",
+            "courseCode",
+            "section",
+            "crn",
+            "title",
+            "unitsMin",
+            "unitsMax",
+            "unitsText",
+            "geCategories",
+            "writingCategories",
+            "instructors",
+            "meetings",
+            "consentRequired",
+            "openSeats",
+            "waitlist",
+          ].join(",")
+        )
+        .eq("consentRequired", false)
+        .gt("openSeats", 0);
 
-    if (!supabase) {
-      res.status(500).json({ message: "Supabase is not configured" });
-      return;
+      query = term ? query.eq("term", term) : query.eq("termCode", termCode);
+
+      const { data, error } = await query
+        .order("courseCode", { ascending: true })
+        .order("section", { ascending: true })
+        .range(from, to);
+      if (error) throw error;
+
+      rows.push(...((data ?? []) as unknown as OfferedCourseRow[]));
+      if (!data || data.length < pageSize) break;
     }
 
-    let query = supabase
-      .from("CoursesOfferedByTerm")
-      .select(
-        "id,termCode,courseCode,section,crn,title,unitsMin,unitsMax,unitsText,geCategories,writingCategories,instructors,meetings,consentRequired,openSeats,waitlist"
+    const courses = rows
+      .filter((course) =>
+        hasProperMeetingTimes(course.meetings) &&
+        (
+          scope === "all" ||
+          (course.geCategories?.length ?? 0) > 0 ||
+          (course.writingCategories?.length ?? 0) > 0
+        )
       )
-      .order("courseCode", { ascending: true })
-      .limit(5000);
+      .map((course) => ({
+        ...course,
+        geCategories: course.geCategories ?? [],
+        writingCategories: course.writingCategories ?? [],
+        instructors: course.instructors ?? [],
+        meetings: course.meetings ?? [],
+        openSeats: course.openSeats ?? 0,
+        waitlist: course.waitlist ?? 0,
+      }));
 
-    query = term ? query.eq("term", term) : query.eq("termCode", termCode);
-
-    if (scope !== "all") {
-      query = query.gt("openSeats", 0);
-    }
-
-    const { data, error } = await query;
-    if (error) {
-      res.status(500).json({ message: error.message });
-      return;
-    }
-
-    res.json({ courses: data ?? [] });
+    res.json({ termCode, courses });
   } catch (err: any) {
-    res.status(500).json({ message: err?.message });
+    console.error("[courses offered error]", err);
+    res.status(500).json({
+      message: err?.message ?? "Failed to load offered courses.",
+    });
   }
 });
 

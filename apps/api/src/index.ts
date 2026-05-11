@@ -6,10 +6,12 @@ import path from "path";
 import googleCalendarRouter from "./routes/googleCalendar";
 import authRouter from "./routes/auth";
 import aiRouter from "./routes/ai";
+import transcriptRouter from "./routes/transcript";
 import coursesRouter from "./routes/courses";
 import degreeAuditRouter from "./routes/degreeAudit";
 import recommendationsRouter from "./routes/recommendations";
 import userCoursesRouter from "./routes/userCourses";
+import aggieMateRouter from "./routes/aggieMate";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
@@ -28,6 +30,12 @@ app.use(authRouter);
 
 // ── Google Calendar OAuth + events ───────────────────────────────────────────
 app.use(googleCalendarRouter);
+
+// ── Transcript PDF parsing ───────────────────────────────────────────────────
+app.use(transcriptRouter);
+
+// ── Aggie Mate study partner matching ────────────────────────────────────────
+app.use(aggieMateRouter);
 
 app.use("/ai", aiRouter);
 app.use("/courses", coursesRouter);
