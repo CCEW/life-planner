@@ -417,12 +417,12 @@ router.get("/api/transcript/me", requireAuth, async (req: AuthRequest, res: Resp
       try {
         majorAudit = await auditMajorRequirements(getSupabase(), courses, majorText);
         // Persist the corrected audit so we don't recompute on every request
-        if (majorAudit) {
-          await getSupabaseAdmin()
+        if (majorAudit){
+          const { error: persistError } = await getSupabaseAdmin()
             .from("User")
             .update({ majorAudit, updatedAt: new Date().toISOString() })
-            .eq("id", req.userId!)
-            .then(() => {});
+            .eq("id", req.userId!);
+          if (persistError) throw persistError;
         }
       } catch (auditErr) {
         console.error("[on-the-fly audit error]", auditErr);
