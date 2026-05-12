@@ -491,6 +491,7 @@ function SchedulePlannerContent() {
   const [geOfferingsError, setGeOfferingsError] = useState<string | null>(null);
   const [plannedCourses, setPlannedCourses] = useState<OfferedCourse[]>([]);
   const [requirementsTab, setRequirementsTab] = useState<RequirementsTab>("ge");
+  const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<Set<string>>(new Set());
   const [studentMajor, setStudentMajor] = useState<string | null>(null);
   const [majorAudit, setMajorAudit] = useState<MajorAudit | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -746,6 +747,8 @@ function SchedulePlannerContent() {
 
   const showingMajorSuggestions = requirementsTab === "major";
   const requirementSuggestions: RequirementSuggestion[] = showingMajorSuggestions ? majorSuggestions : geSuggestions;
+  const visibleSuggestions = requirementSuggestions.filter((c) => !dismissedSuggestionIds.has(c.id)).slice(0, 3);
+  const hiddenCount = requirementSuggestions.filter((c) => !dismissedSuggestionIds.has(c.id)).length - visibleSuggestions.length;
 
   function renderAiAdvisor(isExpanded: boolean) {
     return (
@@ -1103,7 +1106,12 @@ function SchedulePlannerContent() {
               ].map((tab) => (
                 <button
                   key={tab.key}
-                  onClick={() => setRequirementsTab(tab.key)}
+                  onClick={() => {
+                    if (tab.key !== requirementsTab) {
+                      setRequirementsTab(tab.key);
+                      setDismissedSuggestionIds(new Set());
+                    }
+                  }}
                   className={`text-[12px] font-medium rounded-md py-1.5 transition-colors ${
                     requirementsTab === tab.key
                       ? "bg-[#1B3968] text-white"
@@ -1220,9 +1228,20 @@ function SchedulePlannerContent() {
                 <p className="text-[12px] text-[#487A62] text-center py-8 px-2">
                   Your current transcript meets the tracked {showingMajorSuggestions ? "major" : "GE"} requirements.
                 </p>
+              ) : visibleSuggestions.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 py-8">
+                  <p className="text-[12px] text-[#94AAA1]">You&apos;ve dismissed all suggestions.</p>
+                  <button
+                    type="button"
+                    onClick={() => setDismissedSuggestionIds(new Set())}
+                    className="text-[11px] text-[#1B3968] font-medium hover:underline"
+                  >
+                    Start over
+                  </button>
+                </div>
               ) : (
                 <>
-                  {requirementSuggestions.map((course) => (
+                  {visibleSuggestions.map((course) => (
                     <div key={course.id} className="px-3 py-2.5 rounded-lg bg-white/70 border border-[#B3C1BB]/30">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
@@ -1231,13 +1250,22 @@ function SchedulePlannerContent() {
                           </p>
                           <p className="text-[11px] text-[#1a1a1a] truncate">{course.title}</p>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <span className="text-[10px] text-[#5a6872]">{getCourseUnits(course)} u</span>
                           <button
+                            type="button"
                             onClick={() => handleAddPlannedCourse(course)}
                             className="px-2 py-1 rounded-md bg-[#1B3968] text-white text-[10px] font-medium hover:opacity-90 transition-opacity"
                           >
                             Add
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Dismiss suggestion"
+                            onClick={() => setDismissedSuggestionIds((prev) => new Set([...prev, course.id]))}
+                            className="w-5 h-5 flex items-center justify-center rounded text-[#B3C1BB] hover:text-[#9B3A2F] hover:bg-[#FFF4F2] transition-colors text-[12px] leading-none"
+                          >
+                            ×
                           </button>
                         </div>
                       </div>
@@ -1252,9 +1280,21 @@ function SchedulePlannerContent() {
                       </p>
                     </div>
                   ))}
-                  <p className="text-[10px] text-[#B3C1BB] px-1">
-                    Matched to {showingMajorSuggestions ? "major" : "GE"} requirement rows currently marked ✗.
-                  </p>
+                  <div className="flex items-center justify-between px-1">
+                    <p className="text-[10px] text-[#B3C1BB]">
+                      Matched to {showingMajorSuggestions ? "major" : "GE"} requirements marked ✗.
+                      {hiddenCount > 0 && ` ${hiddenCount} more available.`}
+                    </p>
+                    {dismissedSuggestionIds.size > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setDismissedSuggestionIds(new Set())}
+                        className="text-[10px] text-[#1B3968] hover:underline shrink-0"
+                      >
+                        Start over
+                      </button>
+                    )}
+                  </div>
                 </>
               )}
             </div>
