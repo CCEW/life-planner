@@ -1286,7 +1286,7 @@ function SchedulePlannerContent() {
                 <CloseIcon />
               </button>
             </div>
-            <div className="min-h-0 flex-1">
+            <div className="min-h-0 flex-1 flex flex-col overflow-hidden">
               {renderAiAdvisor(true)}
             </div>
           </section>
