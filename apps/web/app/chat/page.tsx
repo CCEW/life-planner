@@ -26,7 +26,9 @@ export default function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!localStorage.getItem("token")) router.push("/signin");
+    fetch("/api/auth/me").then((r) => {
+      if (!r.ok) router.push("/signin");
+    });
   }, [router]);
 
   useEffect(() => {

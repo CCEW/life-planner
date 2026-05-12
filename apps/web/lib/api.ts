@@ -1,10 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
-
-function authHeaders(): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  const token = localStorage.getItem("token");
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+const API_URL = "/api/proxy";
 
 async function request<T>(
   method: string,
@@ -23,10 +17,8 @@ async function request<T>(
 
   const res = await fetch(url, {
     method,
-    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...authHeaders(),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });

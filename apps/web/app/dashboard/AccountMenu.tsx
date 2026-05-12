@@ -3,16 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-
-function clearUserScopedStorage() {
-  localStorage.removeItem("token");
-  for (const key of Object.keys(localStorage)) {
-    if (key.startsWith("life-planner:")) localStorage.removeItem(key);
-  }
-  document.cookie = "token=; path=/; max-age=0; SameSite=Lax";
-}
-
 export default function AccountMenu({ fullName }: { fullName: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -47,12 +37,8 @@ export default function AccountMenu({ fullName }: { fullName: string }) {
 
     setLoggingOut(true);
     try {
-      await fetch(`${API}/auth/signout`, {
-        method: "POST",
-        credentials: "include",
-      });
+      await fetch("/api/auth/signout", { method: "POST" });
     } finally {
-      clearUserScopedStorage();
       router.replace("/signin");
       router.refresh();
     }
