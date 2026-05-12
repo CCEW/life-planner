@@ -426,7 +426,8 @@ router.get("/api/transcript/me", requireAuth, async (req: AuthRequest, res: Resp
         }
       } catch (auditErr) {
         console.error("[on-the-fly audit error]", auditErr);
-        majorAudit = storedAudit; // fall back to stale data on error
+        // Do not revive a known-mismatched audit on failure
+        if (!majorMismatch) majorAudit = storedAudit;
       }
     }
 
@@ -491,11 +492,16 @@ router.post(
       }
 
       // Profile major (from signup dropdown) is more authoritative than OCR text
-      const { data: userRow } = await getSupabaseAdmin()
+      const { data: userRow, error: userRowError } = await getSupabaseAdmin()
         .from("User")
         .select("major")
         .eq("id", req.userId!)
         .maybeSingle();
+      if (userRowError) {
+        console.error("[profile major fetch error]", userRowError);
+        res.status(500).json({ error: "Failed to load user profile." });
+        return;
+      }
       const profileMajor = (userRow as Record<string, unknown> | null)?.major as string | null ?? null;
       const majorForAudit = profileMajor || parsed.major;
 
@@ -510,12 +516,12 @@ router.post(
         getSupabaseAdmin(),
         req.userId!,
         courses,
-        parsed.major,
+        majorForAudit,
         majorAudit,
         courseLookup
       );
 
-      res.json({ courses, major: parsed.major, majorAudit, method: hasKey ? "claude" : "heuristic" });
+      res.json({ courses, major: majorForAudit, majorAudit, method: hasKey ? "claude" : "heuristic" });
     } catch (err) {
       console.error("[transcript error]", err);
       res.status(500).json({ error: "Failed to parse transcript." });
