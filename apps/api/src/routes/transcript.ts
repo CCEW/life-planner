@@ -388,17 +388,31 @@ router.get("/api/transcript/me", requireAuth, async (req: AuthRequest, res: Resp
   try {
     const { data, error } = await getSupabaseAdmin()
       .from("User")
-      .select("transcriptCourses,transcriptParsedAt,transcriptMajor,majorAudit")
+      .select("transcriptCourses,transcriptParsedAt,transcriptMajor,majorAudit,major")
       .eq("id", req.userId!)
       .maybeSingle();
 
     if (error) throw error;
 
+    const row = data as Record<string, unknown> | null;
+    const courses = parseJsonField<ParsedCourse[]>(row?.transcriptCourses, []);
+    const majorText = (row?.transcriptMajor as string | null) ?? (row?.major as string | null) ?? null;
+    let majorAudit = parseJsonField<unknown | null>(row?.majorAudit, null);
+
+    // If no stored audit but we have courses and a major, compute it now
+    if (!majorAudit && courses.length > 0 && majorText) {
+      try {
+        majorAudit = await auditMajorRequirements(getSupabase(), courses, majorText);
+      } catch (auditErr) {
+        console.error("[on-the-fly audit error]", auditErr);
+      }
+    }
+
     res.json({
-      courses: parseJsonField<ParsedCourse[]>(data?.transcriptCourses, []),
-      transcriptParsedAt: data?.transcriptParsedAt ?? null,
-      major: data?.transcriptMajor ?? null,
-      majorAudit: parseJsonField<unknown | null>(data?.majorAudit, null),
+      courses,
+      transcriptParsedAt: row?.transcriptParsedAt ?? null,
+      major: majorText,
+      majorAudit,
     });
   } catch (err) {
     console.error("[transcript fetch error]", err);
@@ -454,9 +468,18 @@ router.post(
         }
       }
 
+      // Profile major (from signup dropdown) is more authoritative than OCR text
+      const { data: userRow } = await getSupabaseAdmin()
+        .from("User")
+        .select("major")
+        .eq("id", req.userId!)
+        .maybeSingle();
+      const profileMajor = (userRow as Record<string, unknown> | null)?.major as string | null ?? null;
+      const majorForAudit = profileMajor || parsed.major;
+
       let majorAudit = null;
       try {
-        majorAudit = await auditMajorRequirements(getSupabase(), courses, parsed.major);
+        majorAudit = await auditMajorRequirements(getSupabase(), courses, majorForAudit);
       } catch (auditErr) {
         console.error("[major audit error]", auditErr);
       }
