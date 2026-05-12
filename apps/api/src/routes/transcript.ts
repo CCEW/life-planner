@@ -396,15 +396,37 @@ router.get("/api/transcript/me", requireAuth, async (req: AuthRequest, res: Resp
 
     const row = data as Record<string, unknown> | null;
     const courses = parseJsonField<ParsedCourse[]>(row?.transcriptCourses, []);
-    const majorText = (row?.transcriptMajor as string | null) ?? (row?.major as string | null) ?? null;
-    let majorAudit = parseJsonField<unknown | null>(row?.majorAudit, null);
 
-    // If no stored audit but we have courses and a major, compute it now
+    // Profile major (signup dropdown) is authoritative; transcript OCR text is a fallback
+    const profileMajor = (row?.major as string | null) ?? null;
+    const majorText = profileMajor ?? (row?.transcriptMajor as string | null) ?? null;
+
+    const storedAudit = parseJsonField<Record<string, unknown> | null>(row?.majorAudit, null);
+    const storedAuditMajorName = (storedAudit?.major as Record<string, unknown> | null)?.name as string | null ?? null;
+
+    // Re-run if stored audit was computed for a different major than the user's profile
+    const majorMismatch =
+      storedAuditMajorName &&
+      profileMajor &&
+      storedAuditMajorName.toLowerCase().trim() !== profileMajor.toLowerCase().trim();
+
+    let majorAudit: unknown = majorMismatch ? null : storedAudit;
+
+    // Compute (or recompute) if needed
     if (!majorAudit && courses.length > 0 && majorText) {
       try {
         majorAudit = await auditMajorRequirements(getSupabase(), courses, majorText);
+        // Persist the corrected audit so we don't recompute on every request
+        if (majorAudit) {
+          await getSupabaseAdmin()
+            .from("User")
+            .update({ majorAudit, updatedAt: new Date().toISOString() })
+            .eq("id", req.userId!)
+            .then(() => {});
+        }
       } catch (auditErr) {
         console.error("[on-the-fly audit error]", auditErr);
+        majorAudit = storedAudit; // fall back to stale data on error
       }
     }
 
