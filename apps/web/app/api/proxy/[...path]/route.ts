@@ -13,9 +13,11 @@ async function handler(req: NextRequest, context: { params: Promise<Params> }) {
   const upstream = new URL(`${API}/${path.join("/")}`);
   upstream.search = req.nextUrl.search;
 
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
+  const headers: Record<string, string> = {};
+  const contentType = req.headers.get("content-type");
+  if (contentType) {
+    headers["Content-Type"] = contentType;
+  }
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }

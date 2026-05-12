@@ -26,9 +26,9 @@ export default function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch("/api/auth/me").then((r) => {
-      if (!r.ok) router.push("/signin");
-    });
+    fetch("/api/auth/me")
+      .then((r) => { if (!r.ok) router.push("/signin"); })
+      .catch(() => router.push("/signin"));
   }, [router]);
 
   useEffect(() => {

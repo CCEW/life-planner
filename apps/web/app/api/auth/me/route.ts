@@ -11,11 +11,21 @@ export async function GET(_req: NextRequest) {
     return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
   }
 
-  const upstream = await fetch(`${API}/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${API}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch {
+    return NextResponse.json({ error: "Auth service unavailable" }, { status: 502 });
+  }
 
-  const data = await upstream.json();
+  let data: unknown;
+  try {
+    data = await upstream.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid response from auth service" }, { status: 502 });
+  }
 
   if (!upstream.ok) {
     return NextResponse.json(data, { status: upstream.status });
