@@ -1106,7 +1106,12 @@ function SchedulePlannerContent() {
               ].map((tab) => (
                 <button
                   key={tab.key}
-                  onClick={() => { setRequirementsTab(tab.key); setDismissedSuggestionIds(new Set()); }}
+                  onClick={() => {
+                    if (tab.key !== requirementsTab) {
+                      setRequirementsTab(tab.key);
+                      setDismissedSuggestionIds(new Set());
+                    }
+                  }}
                   className={`text-[12px] font-medium rounded-md py-1.5 transition-colors ${
                     requirementsTab === tab.key
                       ? "bg-[#1B3968] text-white"
