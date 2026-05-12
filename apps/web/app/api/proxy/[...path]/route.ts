@@ -23,7 +23,7 @@ async function handler(req: NextRequest, context: { params: Promise<Params> }) {
   }
 
   const body = req.method !== "GET" && req.method !== "HEAD"
-    ? await req.text()
+    ? await req.arrayBuffer()
     : undefined;
 
   const upstreamRes = await fetch(upstream.toString(), {
