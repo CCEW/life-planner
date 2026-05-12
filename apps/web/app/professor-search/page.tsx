@@ -45,7 +45,7 @@ type CompatibilityResult = {
 
 type SortOption = "name-asc" | "name-desc" | "compatibility";
 type CopyTarget = "idle" | "email" | "subject" | "body";
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const API_URL = "/api/proxy";
 
 const STOP_WORDS = new Set([
   "a", "an", "and", "are", "as", "at", "based", "by", "course", "courses", "data", "design", "for", "from", "in",
@@ -257,13 +257,6 @@ function compatibilityColor(score: number | null): string {
   return "#B35C5C";
 }
 
-function authHeaders(): HeadersInit {
-  if (typeof window === "undefined") {
-    return {};
-  }
-  const token = window.localStorage.getItem("token");
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
 
 function calculateCompatibility(professor: Professor, transcriptCourses: TranscriptCourse[]): CompatibilityResult {
   const usableCourses = transcriptCourses.filter(isUsableTranscriptCourse);
@@ -862,9 +855,7 @@ export default function ProfessorSearchPage() {
       setLoadError(null);
 
       try {
-        const response = await fetch(`${API_URL}/professors`, {
-          credentials: "include",
-        });
+        const response = await fetch(`${API_URL}/professors`);
         const payload = await response.json();
 
         if (!response.ok) {
@@ -901,10 +892,7 @@ export default function ProfessorSearchPage() {
       setTranscriptError(null);
 
       try {
-        const response = await fetch(`${API_URL}/api/transcript/me`, {
-          credentials: "include",
-          headers: authHeaders(),
-        });
+        const response = await fetch(`${API_URL}/api/transcript/me`);
         const payload = await response.json().catch(() => ({}));
 
         if (response.status === 401) {
@@ -1048,7 +1036,6 @@ export default function ProfessorSearchPage() {
         headers: {
           "content-type": "application/json",
         },
-        credentials: "include",
         body: JSON.stringify({
           professor: drafted,
           senderEmail,

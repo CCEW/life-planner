@@ -4,7 +4,7 @@ import { useEffect, useState, Fragment } from "react";
 import Link from "next/link";
 import Image from "next/image";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const API = "/api/proxy";
 
 type TranscriptCourse = {
   courseCode: string;
@@ -79,9 +79,7 @@ export default function AggiematePage() {
 
     async function syncCurrentCourses() {
       try {
-        const res = await fetch(`${API}/api/transcript/me`, {
-          credentials: "include",
-        });
+        const res = await fetch(`${API}/api/transcript/me`);
         if (!res.ok) {
           if (!cancelled) setCurrentCourses([]);
           return;
@@ -120,7 +118,6 @@ export default function AggiematePage() {
       try {
         const res = await fetch(`${API}/api/aggie-mate/search`, {
           method: "POST",
-          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             query,
@@ -197,7 +194,6 @@ export default function AggiematePage() {
     try {
       const res = await fetch(`${API}/api/aggie-mate/matches`, {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           courses: currentCourses,
@@ -221,7 +217,6 @@ export default function AggiematePage() {
     try {
       const res = await fetch(`${API}/api/aggie-mate/match`, {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ receiverId: userId }),
       });
