@@ -23,7 +23,7 @@ async function handler(req: NextRequest, context: { params: Promise<Params> }) {
   }
 
   const body = req.method !== "GET" && req.method !== "HEAD"
-    ? await req.text()
+    ? await req.arrayBuffer()
     : undefined;
 
   const upstreamRes = await fetch(upstream.toString(), {
@@ -41,10 +41,10 @@ async function handler(req: NextRequest, context: { params: Promise<Params> }) {
     }
   }
 
-  const responseBody = await upstreamRes.text();
+  const responseBody = await upstreamRes.arrayBuffer();
   return new NextResponse(responseBody, {
     status: upstreamRes.status,
-    headers: { "Content-Type": upstreamRes.headers.get("Content-Type") ?? "application/json" },
+    headers: { "Content-Type": upstreamRes.headers.get("Content-Type") ?? "application/octet-stream" },
   });
 }
 

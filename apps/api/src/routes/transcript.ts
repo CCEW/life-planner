@@ -388,17 +388,54 @@ router.get("/api/transcript/me", requireAuth, async (req: AuthRequest, res: Resp
   try {
     const { data, error } = await getSupabaseAdmin()
       .from("User")
-      .select("transcriptCourses,transcriptParsedAt,transcriptMajor,majorAudit")
+      .select("transcriptCourses,transcriptParsedAt,transcriptMajor,majorAudit,major")
       .eq("id", req.userId!)
       .maybeSingle();
 
     if (error) throw error;
 
+    const row = data as Record<string, unknown> | null;
+    const courses = parseJsonField<ParsedCourse[]>(row?.transcriptCourses, []);
+
+    // Profile major (signup dropdown) is authoritative; transcript OCR text is a fallback
+    const profileMajor = (row?.major as string | null) ?? null;
+    const majorText = profileMajor ?? (row?.transcriptMajor as string | null) ?? null;
+
+    const storedAudit = parseJsonField<Record<string, unknown> | null>(row?.majorAudit, null);
+    const storedAuditMajorName = (storedAudit?.major as Record<string, unknown> | null)?.name as string | null ?? null;
+
+    // Re-run if stored audit was computed for a different major than the user's profile
+    const majorMismatch =
+      storedAuditMajorName &&
+      profileMajor &&
+      storedAuditMajorName.toLowerCase().trim() !== profileMajor.toLowerCase().trim();
+
+    let majorAudit: unknown = majorMismatch ? null : storedAudit;
+
+    // Compute (or recompute) if needed
+    if (!majorAudit && courses.length > 0 && majorText) {
+      try {
+        majorAudit = await auditMajorRequirements(getSupabase(), courses, majorText);
+        // Persist the corrected audit so we don't recompute on every request
+        if (majorAudit){
+          const { error: persistError } = await getSupabaseAdmin()
+            .from("User")
+            .update({ majorAudit, updatedAt: new Date().toISOString() })
+            .eq("id", req.userId!);
+          if (persistError) throw persistError;
+        }
+      } catch (auditErr) {
+        console.error("[on-the-fly audit error]", auditErr);
+        // Do not revive a known-mismatched audit on failure
+        if (!majorMismatch) majorAudit = storedAudit;
+      }
+    }
+
     res.json({
-      courses: parseJsonField<ParsedCourse[]>(data?.transcriptCourses, []),
-      transcriptParsedAt: data?.transcriptParsedAt ?? null,
-      major: data?.transcriptMajor ?? null,
-      majorAudit: parseJsonField<unknown | null>(data?.majorAudit, null),
+      courses,
+      transcriptParsedAt: row?.transcriptParsedAt ?? null,
+      major: majorText,
+      majorAudit,
     });
   } catch (err) {
     console.error("[transcript fetch error]", err);
@@ -454,9 +491,23 @@ router.post(
         }
       }
 
+      // Profile major (from signup dropdown) is more authoritative than OCR text
+      const { data: userRow, error: userRowError } = await getSupabaseAdmin()
+        .from("User")
+        .select("major")
+        .eq("id", req.userId!)
+        .maybeSingle();
+      if (userRowError) {
+        console.error("[profile major fetch error]", userRowError);
+        res.status(500).json({ error: "Failed to load user profile." });
+        return;
+      }
+      const profileMajor = (userRow as Record<string, unknown> | null)?.major as string | null ?? null;
+      const majorForAudit = profileMajor || parsed.major;
+
       let majorAudit = null;
       try {
-        majorAudit = await auditMajorRequirements(getSupabase(), courses, parsed.major);
+        majorAudit = await auditMajorRequirements(getSupabase(), courses, majorForAudit);
       } catch (auditErr) {
         console.error("[major audit error]", auditErr);
       }
@@ -465,12 +516,12 @@ router.post(
         getSupabaseAdmin(),
         req.userId!,
         courses,
-        parsed.major,
+        majorForAudit,
         majorAudit,
         courseLookup
       );
 
-      res.json({ courses, major: parsed.major, majorAudit, method: hasKey ? "claude" : "heuristic" });
+      res.json({ courses, major: majorForAudit, majorAudit, method: hasKey ? "claude" : "heuristic" });
     } catch (err) {
       console.error("[transcript error]", err);
       res.status(500).json({ error: "Failed to parse transcript." });

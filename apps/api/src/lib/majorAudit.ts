@@ -220,7 +220,13 @@ export async function findMajor(
       return { major, score };
     })
     .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score || b.major.name.length - a.major.name.length)[0]?.major ?? null;
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      // score 80: DB name contains transcript text → shorter name is more exact
+      if (a.score === 80) return a.major.name.length - b.major.name.length;
+      // score 90, 70: longer DB name is a more complete match
+      return b.major.name.length - a.major.name.length;
+    })[0]?.major ?? null;
 }
 
 export async function auditMajorRequirements(
