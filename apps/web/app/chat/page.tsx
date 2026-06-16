@@ -6,6 +6,7 @@ import { chatWithAI } from "../../lib/api";
 interface Message {
   role: "user" | "assistant";
   content: string;
+  isError?: boolean;
 }
 
 interface AiChatResponse {
@@ -45,7 +46,7 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
-      const history = messages.slice(1);
+      const history = messages.slice(1).filter((m) => !m.isError);
       const { data } = await chatWithAI(userMsg.content, history);
       const response = data as AiChatResponse;
       setMessages((prev) => [...prev, { role: "assistant", content: response.reply }]);
@@ -54,8 +55,9 @@ export default function ChatPage() {
         ...prev,
         {
           role: "assistant",
-          content: err.response?.data?.message ?? "Sorry, something went wrong. Try again.",
-        },
+          content: "Sorry, something went wrong. Try again.",
+          isError: true,
+        } as Message,
       ]);
     } finally {
       setLoading(false);

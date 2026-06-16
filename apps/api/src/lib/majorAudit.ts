@@ -108,6 +108,28 @@ function normalizeCourseCode(code: string): string {
   return `${match[1]}${match[2]}${match[3] ?? ""}`;
 }
 
+// UC Davis uses V (virtual), H (honors), Y (hybrid) suffixes as section variants
+// that satisfy the same base course requirement. CMN 1V satisfies CMN 1, etc.
+const SECTION_VARIANTS = ["V", "H", "Y"];
+
+function baseCourseCode(normalized: string): string {
+  const match = normalized.match(/^([A-Z]{2,4})(\d+)([A-Z]+)$/);
+  if (!match) return normalized;
+  const [, dept, num, suffix] = match;
+  // Strip a trailing single variant letter if that's the entire suffix
+  if (SECTION_VARIANTS.includes(suffix)) return `${dept}${num}`;
+  // Strip a trailing variant letter from a longer suffix (e.g. "AY" → "A")
+  if (suffix.length > 1 && SECTION_VARIANTS.includes(suffix[suffix.length - 1]))
+    return `${dept}${num}${suffix.slice(0, -1)}`;
+  return normalized;
+}
+
+function courseCodeKeys(code: string): string[] {
+  const normalized = normalizeCourseCode(code);
+  const base = baseCourseCode(normalized);
+  return base !== normalized ? [normalized, base] : [normalized];
+}
+
 function uniqueCourseCodes(codes: Array<string | null | undefined>): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -165,13 +187,15 @@ function evaluateCourseRule(
   candidateCodes: string[],
   taken: Map<string, AuditCourse>
 ) {
-  const completedCourseCodes = candidateCodes.filter((code) => taken.has(normalizeCourseCode(code)));
-  const missingCourseCodes = candidateCodes.filter((code) => !taken.has(normalizeCourseCode(code)));
+  const takenLookup = (code: string) => courseCodeKeys(code).some((k) => taken.has(k));
+  const takenEntry  = (code: string) => courseCodeKeys(code).map((k) => taken.get(k)).find(Boolean);
+  const completedCourseCodes = candidateCodes.filter(takenLookup);
+  const missingCourseCodes = candidateCodes.filter((code) => !takenLookup(code));
 
   if (ruleType === "CHOOSE_N_UNITS") {
     const required = Number(requiredUnits ?? 0);
     const progress = completedCourseCodes.reduce((sum, code) => (
-      sum + (taken.get(normalizeCourseCode(code))?.units ?? 0)
+      sum + (takenEntry(code)?.units ?? 0)
     ), 0);
     return { met: progress >= required, progress, required, unitBased: true, completedCourseCodes, missingCourseCodes };
   }
@@ -238,7 +262,12 @@ export async function auditMajorRequirements(
   if (!major) return null;
 
   const completedCourses = courses.filter((course) => isCompletedGrade(course.grade));
-  const taken = new Map(completedCourses.map((course) => [normalizeCourseCode(course.courseCode), course]));
+  const taken = new Map<string, AuditCourse>();
+  for (const course of completedCourses) {
+    for (const key of courseCodeKeys(course.courseCode)) {
+      if (!taken.has(key)) taken.set(key, course);
+    }
+  }
   const takenCodes = completedCourses.map((course) => course.courseCode);
 
   const { data: requirementData, error: requirementError } = await supabase

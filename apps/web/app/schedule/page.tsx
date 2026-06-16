@@ -82,6 +82,7 @@ type MajorAudit = {
 type AiMessage = {
   role: "user" | "assistant";
   content: string;
+  isError?: boolean;
 };
 
 type CourseRecommendation = {
@@ -118,17 +119,59 @@ type SavedTranscriptResponse = {
 type ReqItem = { key: string; label: string; val: number; min: number; dividerBefore?: boolean };
 
 function computeRequirements(courses: Course[]): ReqItem[] {
-  const ge: Record<string, number> = {};
-  const wr: Record<string, number> = {};
+  const ge: Record<string, number> = { AH: 0, SS: 0, SE: 0 };
+  const CORE_MINS: Record<string, number> = { WE: 6, OL: 9, VL: 3, ACGH: 3, DD: 3, WC: 3, QL: 3, SL: 3 };
+  const wr: Record<string, number> = Object.fromEntries(Object.keys(CORE_MINS).map((k) => [k, 0]));
+  const TOPICAL = ["AH", "SS", "SE"];
+  const geLog: { courseCode: string; units: number; eligible: string[]; chosen: string }[] = [];
+  const wrLog: { courseCode: string; units: number; eligible: string[]; chosen: string }[] = [];
+
   for (const c of courses) {
     // Only count completed courses; skip in-progress, no-pass, and withdrawals
     if (!c.units || !c.grade || ["IP", "NP", "W"].includes(c.grade)) continue;
-    for (const g of (c.geCategories ?? [])) ge[g] = (ge[g] ?? 0) + c.units;
-    for (const w of (c.writingCategories ?? [])) wr[w] = (wr[w] ?? 0) + c.units;
+
+    // A course counts toward only one topical breadth area.
+    // Pick the area furthest below its minimum (most needed), then its cap.
+    const topicalAreas = (c.geCategories ?? []).filter((g) => TOPICAL.includes(g));
+    if (topicalAreas.length > 0) {
+      const chosen = topicalAreas.reduce((best, area) =>
+        (ge[area] ?? 0) <= (ge[best] ?? 0) ? area : best
+      );
+      ge[chosen] = (ge[chosen] ?? 0) + c.units;
+      geLog.push({ courseCode: c.courseCode, units: c.units, eligible: topicalAreas, chosen });
+    }
+
+    // A course counts toward only one core literacy area.
+    // Prefer unmet categories; if all are met, skip entirely.
+    const coreCats = (c.writingCategories ?? []).filter((w) => w in CORE_MINS);
+    if (coreCats.length > 0) {
+      const unmet = coreCats.filter((cat) => (wr[cat] ?? 0) < (CORE_MINS[cat] ?? 0));
+      const pool = unmet.length > 0 ? unmet : [];
+      if (pool.length > 0) {
+        const chosen = pool.reduce((best, cat) => {
+          const bestShortfall = (CORE_MINS[best] ?? 0) - (wr[best] ?? 0);
+          const catShortfall  = (CORE_MINS[cat]  ?? 0) - (wr[cat]  ?? 0);
+          return catShortfall >= bestShortfall ? cat : best;
+        });
+        wr[chosen] = (wr[chosen] ?? 0) + c.units;
+        wrLog.push({ courseCode: c.courseCode, units: c.units, eligible: coreCats, chosen });
+      } else {
+        wrLog.push({ courseCode: c.courseCode, units: c.units, eligible: coreCats, chosen: "(all met — skipped)" });
+      }
+    }
   }
   const AH = ge["AH"] ?? 0;
   const SS = ge["SS"] ?? 0;
   const SE = ge["SE"] ?? 0;
+
+  console.group("[GE Debug] Topical Breadth allocation");
+  console.table(geLog);
+  console.log("Totals → AH:", AH, "| SS:", SS, "| SE:", SE, "| capped total:", Math.min(AH,20)+Math.min(SS,20)+Math.min(SE,20));
+  console.groupEnd();
+  console.group("[GE Debug] Core Literacy allocation");
+  console.table(wrLog);
+  console.log("Totals →", Object.entries(wr).map(([k,v]) => `${k}: ${v}`).join(" | "));
+  console.groupEnd();
   // Each category caps at 20 units toward the 52-unit total
   const cappedTotal = Math.min(AH, 20) + Math.min(SS, 20) + Math.min(SE, 20);
   const WE = wr["WE"] ?? 0;
@@ -698,7 +741,7 @@ function SchedulePlannerContent() {
     if (!content || aiLoading) return;
 
     const userMessage: AiMessage = { role: "user", content };
-    const history = aiMessages.slice(1);
+    const history = aiMessages.slice(1).filter((m) => !m.isError);
 
     setAiMessages((prev) => [...prev, userMessage]);
     setAiInput("");
@@ -723,7 +766,6 @@ function SchedulePlannerContent() {
         err?.response?.data?.message ??
         "The AI advisor could not respond. Make sure you are signed in and the API is running.";
       setAiError(message);
-      setAiMessages((prev) => [...prev, { role: "assistant", content: message }]);
     } finally {
       setAiLoading(false);
     }
